@@ -68,6 +68,14 @@ def calc_macd(closes):
     dea = ema(dif, 9)
     return [2 * (dif[i] - dea[i]) for i in range(n)]
 
+def calc_ma(data, period):
+    """计算简单移动平均"""
+    n = len(data)
+    result = [None] * n
+    for i in range(period - 1, n):
+        result[i] = sum(data[i - period + 1: i + 1]) / period
+    return result
+
 def calc_rsi(closes, period=14):
     n = len(closes); rsi = [50.0] * n
     if n < period + 1: return rsi
@@ -93,6 +101,7 @@ def detect_double_bottom(df, window=8):
     dates = [d['trade_date'] for d in df]
     macd = calc_macd(closes)
     rsi = calc_rsi(closes)
+    vol_ma20 = calc_ma(volumes, 20)
     
     # 找局部高低点
     lows, highs = [], []
@@ -121,7 +130,10 @@ def detect_double_bottom(df, window=8):
         necks = [h for h in highs if l1_idx < h[0] < l2_idx]
         if not necks: continue
         n_idx, n_price = max(necks, key=lambda x: x[1])
-        if n_price / min(l1_price, l2_price) < 1.05: continue
+        
+        # 颈线高度必须 > 10%
+        neck_height_pct = (n_price - min(l1_price, l2_price)) / min(l1_price, l2_price)
+        if neck_height_pct < 0.10: continue
         
         # 双底必须在指定时间范围内开始形成
         if dates[l1_idx] < DOUBLE_BOTTOM_START: continue
@@ -130,10 +142,21 @@ def detect_double_bottom(df, window=8):
         break_idx = None
         for j in range(l2_idx, n):
             if closes[j] > n_price * 1.01:  # 突破1%算有效突破
+                # 放量确认：突破日成交量 > 20日均量 × 1.5
+                if vol_ma20[j] is None or volumes[j] < vol_ma20[j] * 1.5:
+                    continue
+                # 突破后3天内不回踩颈线×0.98以下
+                fake_break = False
+                for k in range(j + 1, min(j + 4, n)):
+                    if closes[k] < n_price * 0.98:
+                        fake_break = True
+                        break
+                if fake_break:
+                    continue
                 break_idx = j
                 break
         
-        if break_idx is None: continue  # 未突破
+        if break_idx is None: continue  # 未突破或突破无效
         
         results.append({
             'left_idx': l1_idx, 'left_price': l1_price, 'left_date': dates[l1_idx], 'left_vol': l1_vol,
@@ -142,10 +165,11 @@ def detect_double_bottom(df, window=8):
             'break_idx': break_idx, 'break_date': dates[break_idx],
             'gap': gap,
             'price_diff_pct': abs(l1_price - l2_price) / min(l1_price, l2_price),
-            'height_pct': (n_price - min(l1_price, l2_price)) / min(l1_price, l2_price),
+            'height_pct': neck_height_pct,
             'left_macd': macd[l1_idx], 'right_macd': macd[l2_idx],
             'left_rsi': rsi[l1_idx], 'right_rsi': rsi[l2_idx],
-            'closes': closes, 'volumes': volumes, 'dates': dates
+            'closes': closes, 'volumes': volumes, 'dates': dates,
+            'break_vol_ratio': volumes[break_idx] / vol_ma20[break_idx] if vol_ma20[break_idx] and vol_ma20[break_idx] > 0 else 1.0,
         })
     
     return results
@@ -314,10 +338,10 @@ def draw_svg_chart(df, pattern, score, reasons, stock_name, stock_code, save_pat
 # ============ 主程序 ============
 
 def main():
-    print("=" * 50)
-    print("双底突破形态扫描 (近期突破版)")
-    print("条件: 双底始于2025年12月, 刚突破颈线")
-    print("=" * 50)
+    print("=" * 60)
+    print("双底突破形态扫描 (优化版)")
+    print("颈线>10% | 突破放量>1.5xMA20 | 3天不回踩颈线×0.98")
+    print("=" * 60)
     
     print("\n[1/4] 获取股票列表...")
     stocks = get_stock_list()
@@ -390,6 +414,7 @@ def main():
         min_b = min(p['left_price'], p['right_price'])
         target = p['neck_price'] + (p['neck_price'] - min_b)
         space = (target - cp) / cp * 100
+        bvr = p.get('break_vol_ratio', 1.0)
         print(f"\n{'='*40}")
         print(f"第{i+1}名: {item['name']} ({item['code']})")
         print(f"  评分: {item['score']}/100")
@@ -398,6 +423,7 @@ def main():
         print(f"  右底: {format_date(p['right_date'])} @{p['right_price']:.2f}")
         print(f"  颈线: @{p['neck_price']:.2f} | 现价: {cp:.2f} (突破{dist:.1f}%)")
         print(f"  目标: @{target:.2f} (剩余空间{space:.1f}%)")
+        print(f"  颈线高度: {p['height_pct']:.1%} | 突破量比: {bvr:.1f}x")
         for r in item['reasons']: print(f"  + {r}")
 
 if __name__ == '__main__':
