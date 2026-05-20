@@ -92,9 +92,9 @@ def calc_rsi(closes, period=14):
 
 # ============ 双底检测 ============
 
-def detect_double_bottom(df, window=8):
+def detect_double_bottom(df, window_bottom=22, window_breakout=8):
     n = len(df)
-    if n < window * 2 + 1: return []
+    if n < window_bottom * 2 + 1: return []
     
     closes = [float(d['close']) for d in df]
     volumes = [float(d['vol']) for d in df]
@@ -103,13 +103,18 @@ def detect_double_bottom(df, window=8):
     rsi = calc_rsi(closes)
     vol_ma20 = calc_ma(volumes, 20)
     
-    # 找局部高低点
-    lows, highs = [], []
-    for i in range(window, n - window):
+    # 找局部低点（大窗口，只抓主底）
+    lows = []
+    for i in range(window_bottom, n - window_bottom):
         price = closes[i]
-        if all(closes[j] > price for j in range(max(0, i-window), min(n, i+window+1)) if j != i):
+        if all(closes[j] > price for j in range(max(0, i-window_bottom), min(n, i+window_bottom+1)) if j != i):
             lows.append((i, price, volumes[i]))
-        if all(closes[j] < price for j in range(max(0, i-window), min(n, i+window+1)) if j != i):
+    
+    # 找局部高点（小窗口，保持突破附近敏感度）
+    highs = []
+    for i in range(window_breakout, n - window_breakout):
+        price = closes[i]
+        if all(closes[j] < price for j in range(max(0, i-window_breakout), min(n, i+window_breakout+1)) if j != i):
             highs.append((i, price))
     
     if len(lows) < 2 or len(highs) < 1: return []
@@ -365,7 +370,7 @@ def main():
             df = get_daily_data(code)
             if not df or len(df) < 60: continue
             
-            patterns = detect_double_bottom(df, window=8)
+            patterns = detect_double_bottom(df, window_bottom=22, window_breakout=8)
             name = stock_map.get(code, code)
             
             for p in patterns:
