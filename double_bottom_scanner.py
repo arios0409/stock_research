@@ -1,8 +1,8 @@
 """
 双底形态扫描器 - 近期突破版 (无第三方依赖)
 条件:
-- 双底形态形成于 2025年12月 ~ 2026年5月10日
-- 首次突破颈线距离 2026-05-10 越近越好
+- 双底形态形成于 2025年12月 ~ 2026年1月27日
+- 首次突破颈线距离 2026-01-27 越近越好
 - 拉升可能性高
 - 距目标位剩余空间 >= 8%
 """
@@ -17,9 +17,9 @@ import statistics
 # ============ 配置 ============
 TUSHARE_TOKEN = '0265861c3dee65908f646a7c9e01f759ebda32a742b1728f92a7ad60'
 API_URL = 'http://api.tushare.pro'
-END_DATE = '20260510'
+END_DATE = '20260520'
 START_DATE = '20241001'  # 往前多取一些数据用于计算指标
-DOUBLE_BOTTOM_START = '20251201'  # 双底形态开始时间
+DOUBLE_BOTTOM_START = '20240601'  # 双底形态开始时间(回溯扫描需提前)
 MAX_SCAN = 400  # 扫描数量限制
 
 # ============ Tushare API 封装 ============
@@ -92,7 +92,7 @@ def calc_rsi(closes, period=14):
 
 # ============ 双底检测 ============
 
-def detect_double_bottom(df, window=8):
+def detect_double_bottom(df, window=22):
     n = len(df)
     if n < window * 2 + 1: return []
     
@@ -365,7 +365,7 @@ def main():
             df = get_daily_data(code)
             if not df or len(df) < 60: continue
             
-            patterns = detect_double_bottom(df, window=8)
+            patterns = detect_double_bottom(df, window=22)
             name = stock_map.get(code, code)
             
             for p in patterns:
@@ -389,7 +389,7 @@ def main():
         print(f"  {i+1}. {item['name']} ({item['code']}) 评分:{item['score']} 突破于{p['break_date']} ({days_ago}天前)")
     
     print(f"\n[4/4] 生成图片...")
-    output_svg = os.path.expanduser('~/double_bottom_charts_20260510')
+    output_svg = os.path.expanduser('~/double_bottom_charts_20260127')
     os.makedirs(output_svg, exist_ok=True)
     
     for i, item in enumerate(top5):
@@ -398,7 +398,7 @@ def main():
         print(f"  SVG: {svg_path}")
     
     # 转 PNG
-    output_png = os.path.expanduser('~/storage/shared/termux/20260510双底')
+    output_png = os.path.expanduser('~/storage/shared/termux/20260127双底')
     os.makedirs(output_png, exist_ok=True)
     for f in os.listdir(output_svg):
         if f.endswith('.svg'):
