@@ -92,7 +92,7 @@ def calc_rsi(closes, period=14):
 
 # ============ 双底检测 ============
 
-def detect_double_bottom(df, window=22):
+def detect_double_bottom(df, window=8):
     n = len(df)
     if n < window * 2 + 1: return []
     
@@ -365,7 +365,7 @@ def main():
             df = get_daily_data(code)
             if not df or len(df) < 60: continue
             
-            patterns = detect_double_bottom(df, window=22)
+            patterns = detect_double_bottom(df, window=8)
             name = stock_map.get(code, code)
             
             for p in patterns:
