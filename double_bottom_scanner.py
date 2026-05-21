@@ -14,6 +14,8 @@ import time
 import math
 import statistics
 
+from wecom_notify import send_markdown, send_text
+
 # ============ 配置 ============
 TUSHARE_TOKEN = '0265861c3dee65908f646a7c9e01f759ebda32a742b1728f92a7ad60'
 API_URL = 'http://api.tushare.pro'
@@ -460,6 +462,52 @@ def main():
         print(f"  目标: @{target:.2f} (剩余空间{space:.1f}%)")
         print(f"  颈线高度: {p['height_pct']:.1%} | 突破量比: {bvr:.1f}x")
         for r in item['reasons']: print(f"  + {r}")
+
+    # ============ 推送企业微信 ============
+    print(f"\n[推送] 发送到企业微信群...")
+    try:
+        _send_wecom_summary(top5)
+        print("  推送成功 ✅")
+    except Exception as e:
+        print(f"  推送失败: {e}")
+
+
+def _send_wecom_summary(top5: list):
+    """将扫描结果汇总推送企业微信群"""
+    if not top5:
+        send_text("📊 双底扫描完成，未发现符合条件的突破形态")
+        return
+
+    # 汇总消息
+    lines = [
+        "## 📊 双底突破扫描结果",
+        f"扫描时间: {top5[0]['df'][-1]['trade_date'] if top5 else '--'}",
+        "",
+    ]
+
+    for i, item in enumerate(top5):
+        p = item['pattern']
+        cp = float(item['df'][-1]['close'])
+        min_b = min(p['left_price'], p['right_price'])
+        target_price = p['neck_price'] + (p['neck_price'] - min_b)
+        space = (target_price - cp) / cp * 100
+        break_days = len(item['df']) - 1 - p['break_idx']
+        dist_pct = (cp - p['neck_price']) / p['neck_price'] * 100
+
+        emoji = "🔥" if i == 0 else "⭐" if i < 3 else "💡"
+        lines.append(
+            f"{emoji} **TOP{i+1} {item['name']}** ({item['code'].split('.')[0]})"
+        )
+        lines.append(f"> 评分: **{item['score']}/100**")
+        lines.append(f"> 突破日: {p['break_date']} ({break_days}天前)")
+        lines.append(f"> 颈线: {p['neck_price']:.2f} | 现价: {cp:.2f} (突破{dist_pct:+.1f}%)")
+        lines.append(f"> 目标位: **{target_price:.2f}** (剩余空间 **{space:.1f}%**)")
+        if i < 3:
+            key_reason = item['reasons'][0] if item['reasons'] else ''
+            lines.append(f"> {key_reason}")
+        lines.append("")
+
+    send_markdown("\n".join(lines))
 
 if __name__ == '__main__':
     main()
