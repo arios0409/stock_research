@@ -1,8 +1,8 @@
 """
 双底形态扫描器 - 近期突破版 (无第三方依赖)
 条件:
-- 双底形态形成于 2025年12月 ~ 2026年1月27日
-- 首次突破颈线距离 2026-01-27 越近越好
+- 双底形态形成于 2025年12月 ~ 2026年5月20日
+- 首次突破颈线距离 2026-05-20 越近越好
 - 拉升可能性高
 - 距目标位剩余空间 >= 8%
 """
@@ -140,6 +140,18 @@ def detect_double_bottom(df, window_bottom=22, window_breakout=8):
         neck_height_pct = (n_price - min(l1_price, l2_price)) / min(l1_price, l2_price)
         if neck_height_pct < 0.10: continue
         
+        # 颈线必须在左底之前被价格触及过（形成W底的左侧下降段）
+        # 检查左底前100天内是否有High >= 颈线*0.95
+        pre_left_high = max(closes[max(0, l1_idx-100):l1_idx]) if l1_idx > 0 else 0
+        if pre_left_high < n_price * 0.95:
+            continue  # 颈线太高，左底前价格根本没到过这里，不是真正的W底
+        
+        # 左侧下跌段空间必须 >= 双底高度 × 2
+        left_drop = pre_left_high - l1_price  # 左侧下跌幅度
+        db_height = n_price - min(l1_price, l2_price)  # 双底高度(颈线到底部)
+        if left_drop < db_height * 2:
+            continue  # 左侧跌得不够深，形态不够立体
+        
         # 双底必须在指定时间范围内开始形成
         if dates[l1_idx] < DOUBLE_BOTTOM_START: continue
         
@@ -200,6 +212,24 @@ def score_pattern(df, pattern):
     target = neck_price + (neck_price - min_bottom)
     space_to_target = (target - current_price) / current_price
     if space_to_target < 0.08: return -1, []  # 空间不足
+    
+    # 新增：检查突破后的走势，已经走完的形态大幅降低得分
+    break_idx = pattern['break_idx']
+    post_break_high = max(float(df[i]['high']) for i in range(break_idx, n))
+    post_break_max_close = max(float(df[i]['close']) for i in range(break_idx, n))
+    
+    # 如果突破后最高价已经 >= 目标位，说明行情已经走完，降权
+    if post_break_high >= target:
+        score -= 30; reasons.append(f'已触及目标(最高{post_break_high:.2f})')
+    elif post_break_high >= target * 0.8:
+        score -= 10; reasons.append(f'已接近目标(最高{post_break_high:.2f}/{target:.2f})')
+    
+    # 如果现价从突破后高点回撤 > 15%，说明已经跌下来了，降权
+    drawdown = (post_break_high - current_price) / post_break_high
+    if drawdown > 0.15:
+        score -= 25; reasons.append(f'突破后回撤{drawdown:.0%}(已走弱)')
+    elif drawdown > 0.08:
+        score -= 10; reasons.append(f'突破后回撤{drawdown:.0%}')
     
     # === 评分项 ===
     
@@ -375,7 +405,7 @@ def main():
             
             for p in patterns:
                 score, reasons = score_pattern(df, p)
-                if score >= 40:
+                if score >= 30:
                     all_patterns.append({
                         'code': code, 'name': name, 'df': df,
                         'pattern': p, 'score': score, 'reasons': reasons
@@ -394,7 +424,7 @@ def main():
         print(f"  {i+1}. {item['name']} ({item['code']}) 评分:{item['score']} 突破于{p['break_date']} ({days_ago}天前)")
     
     print(f"\n[4/4] 生成图片...")
-    output_svg = os.path.expanduser('~/double_bottom_charts_20260127')
+    output_svg = os.path.expanduser('~/double_bottom_charts_20260520')
     os.makedirs(output_svg, exist_ok=True)
     
     for i, item in enumerate(top5):
@@ -403,7 +433,7 @@ def main():
         print(f"  SVG: {svg_path}")
     
     # 转 PNG
-    output_png = os.path.expanduser('~/storage/shared/termux/20260127双底')
+    output_png = os.path.expanduser('~/storage/shared/termux/20260520双底')
     os.makedirs(output_png, exist_ok=True)
     for f in os.listdir(output_svg):
         if f.endswith('.svg'):
