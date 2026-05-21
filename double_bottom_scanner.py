@@ -14,7 +14,7 @@ import time
 import math
 import statistics
 
-from wecom_notify import send_markdown, send_text
+from wecom_notify import send_markdown, send_text, send_image_file
 
 # ============ 配置 ============
 TUSHARE_TOKEN = '0265861c3dee65908f646a7c9e01f759ebda32a742b1728f92a7ad60'
@@ -434,13 +434,18 @@ def main():
         draw_svg_chart(item['df'], item['pattern'], item['score'], item['reasons'], item['name'], item['code'], svg_path)
         print(f"  SVG: {svg_path}")
     
-    # 转 PNG
-    output_png = os.path.expanduser('~/storage/shared/termux/20260520双底')
+# 转 PNG
+    output_png = os.path.expanduser('~/double_bottom_charts_20260520_png')
     os.makedirs(output_png, exist_ok=True)
-    for f in os.listdir(output_svg):
+    png_paths = []
+    for f in sorted(os.listdir(output_svg)):
         if f.endswith('.svg'):
-            os.system(f'magick "{os.path.join(output_svg, f)}" "{os.path.join(output_png, f.replace(".svg", ".png"))}" 2>&1')
-    
+            png_file = f.replace('.svg', '.png')
+            png_path = os.path.join(output_png, png_file)
+            os.system(f'magick "{os.path.join(output_svg, f)}" "{png_path}" 2>&1')
+            if os.path.exists(png_path):
+                png_paths.append(png_path)
+
     print(f"\n完成! PNG保存在: {output_png}")
     print("=" * 50)
     
@@ -466,14 +471,14 @@ def main():
     # ============ 推送企业微信 ============
     print(f"\n[推送] 发送到企业微信群...")
     try:
-        _send_wecom_summary(top5)
+        _send_wecom_summary(top5, png_paths)
         print("  推送成功 ✅")
     except Exception as e:
         print(f"  推送失败: {e}")
 
 
-def _send_wecom_summary(top5: list):
-    """将扫描结果汇总推送企业微信群"""
+def _send_wecom_summary(top5: list, png_paths: list | None = None):
+    """将扫描结果汇总推送企业微信群（含图片）"""
     if not top5:
         send_text("📊 双底扫描完成，未发现符合条件的突破形态")
         return
@@ -508,6 +513,14 @@ def _send_wecom_summary(top5: list):
         lines.append("")
 
     send_markdown("\n".join(lines))
+
+    # 发送 PNG 图片
+    if png_paths:
+        import time as _time
+        for png_path in png_paths:
+            result = send_image_file(png_path)
+            print(f"  图片 {png_path}: {result.get('errmsg', result)}")
+            _time.sleep(0.3)  # 避免频率限制
 
 if __name__ == '__main__':
     main()

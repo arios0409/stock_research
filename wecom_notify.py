@@ -45,6 +45,23 @@ def send_image(base64_data: str, md5_hash: str) -> dict:
     return _post(payload)
 
 
+def send_image_file(file_path: str) -> dict:
+    """从文件路径发送图片，自动 base64 编码 + MD5"""
+    import hashlib
+    import base64
+
+    with open(file_path, 'rb') as f:
+        data = f.read()
+
+    # 检查大小 (企业微信限制 2MB)
+    if len(data) > 2 * 1024 * 1024:
+        return {'errcode': -1, 'errmsg': f'图片超过2MB: {file_path}'}
+
+    b64 = base64.b64encode(data).decode('utf-8')
+    md5 = hashlib.md5(data).hexdigest()
+    return send_image(b64, md5)
+
+
 def send_news(articles: list) -> dict:
     """发送图文消息
     articles: [{'title': '', 'description': '', 'url': '', 'picurl': ''}, ...]
