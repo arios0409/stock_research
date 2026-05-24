@@ -14,12 +14,12 @@ import time
 import math
 import statistics
 
-from wecom_notify import send_markdown, send_text, send_image_file
+from wecom_notify import send_markdown, send_text, send_image_file, send_file, upload_file
 
 # ============ 配置 ============
 TUSHARE_TOKEN = '0265861c3dee65908f646a7c9e01f759ebda32a742b1728f92a7ad60'
 API_URL = 'http://api.tushare.pro'
-END_DATE = '20260520'
+END_DATE = '20260521'
 START_DATE = '20241001'  # 往前多取一些数据用于计算指标
 DOUBLE_BOTTOM_START = '20240601'  # 双底形态开始时间(回溯扫描需提前)
 MAX_SCAN = 400  # 扫描数量限制
@@ -148,13 +148,7 @@ def detect_double_bottom(df, window_bottom=22, window_breakout=8):
         if pre_left_high < n_price * 0.95:
             continue  # 颈线太高，左底前价格根本没到过这里，不是真正的W底
         
-        # 左侧下跌段空间必须 >= 双底高度 × 2
-        left_drop = pre_left_high - l1_price  # 左侧下跌幅度
-        db_height = n_price - min(l1_price, l2_price)  # 双底高度(颈线到底部)
-        if left_drop < db_height * 2:
-            continue  # 左侧跌得不够深，形态不够立体
-        
-        # 双底必须在指定时间范围内开始形成
+# 双底必须在指定时间范围内开始形成
         if dates[l1_idx] < DOUBLE_BOTTOM_START: continue
         
         # 检查突破颈线的时间
@@ -306,6 +300,7 @@ def draw_svg_chart(df, pattern, score, reasons, stock_name, stock_code, save_pat
     def vy(vol): return margin['top'] + price_h + gap_h + (1 - vol / max_v) * vol_h
     
     svg = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}">',
+           '<defs><style>text { font-family: "Droid Sans Fallback", "Noto Sans SC", "WenQuanYi Micro Hei", "Microsoft YaHei", sans-serif; }</style></defs>',
            f'<rect width="{W}" height="{H}" fill="#1a1a2e"/>',
            f'<text x="{W/2}" y="28" text-anchor="middle" font-size="16" fill="#e0e0e0" font-weight="bold">{stock_name} ({stock_code})  双底突破  评分:{score}/100</text>']
     
@@ -372,6 +367,152 @@ def draw_svg_chart(df, pattern, score, reasons, stock_name, stock_code, save_pat
     svg.append('</svg>')
     with open(save_path, 'w') as f: f.write('\n'.join(svg))
 
+
+def draw_png_chart(df, pattern, score, reasons, stock_name, stock_code, save_path):
+    """用 Pillow 直接渲染 PNG 图表，中文字体可靠。"""
+    from PIL import Image, ImageDraw, ImageFont
+    import os as _os
+
+    W, H = 900, 650
+    margin = {'top': 50, 'right': 60, 'bottom': 100, 'left': 70}
+    chart_w = W - margin['left'] - margin['right']
+    chart_h = H - margin['top'] - margin['bottom']
+    price_h = int(chart_h * 0.65); vol_h = int(chart_h * 0.25); gap_h = int(chart_h * 0.1)
+
+    closes = [float(d['close']) for d in df]
+    volumes = [float(d['vol']) for d in df]
+    dates = [d['trade_date'] for d in df]
+    n = len(df)
+
+    min_p = min(closes) * 0.97; max_p = max(closes) * 1.02
+    max_v = max(volumes) * 1.2
+
+    def px(i): return margin['left'] + int((i / max(1, n - 1)) * chart_w)
+    def py(price): return margin['top'] + int((1 - (price - min_p) / (max_p - min_p)) * price_h)
+    def vy(vol): return margin['top'] + price_h + gap_h + int((1 - vol / max_v) * vol_h)
+
+    # 双字体: DejaVu Sans 处理 Latin/ASCII, Droid Sans Fallback 处理 CJK
+    font_latin_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+    font_cjk_path = '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf'
+    if not _os.path.exists(font_cjk_path):
+        font_cjk_path = _os.path.expanduser('~/.local/share/fonts/NotoSansSC.ttf')
+
+    def _make_fonts(size):
+        return (
+            ImageFont.truetype(font_latin_path, size),
+            ImageFont.truetype(font_cjk_path, size),
+        )
+
+    f_title_l, f_title_c = _make_fonts(16)
+    f_norm_l, f_norm_c = _make_fonts(10)
+    f_small_l, f_small_c = _make_fonts(9)
+    f_label_l, f_label_c = _make_fonts(12)
+    f_reason_l, f_reason_c = _make_fonts(11)
+
+    def _is_cjk(ch):
+        cp = ord(ch)
+        return (0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF or
+                0x20000 <= cp <= 0x2A6DF or 0xF900 <= cp <= 0xFAFF or
+                0x2F800 <= cp <= 0x2FA1F)
+
+    def _draw_text(draw, xy, text, fill, font_latin: ImageFont.FreeTypeFont,
+                   font_cjk: ImageFont.FreeTypeFont, anchor=None):
+        """逐字符混合字体绘制，保证中西文都正确渲染。"""
+        x, y = xy
+        i = 0
+        while i < len(text):
+            ch = text[i]
+            font = font_cjk if _is_cjk(ch) else font_latin
+            bbox = font.getbbox(ch)
+            ch_w = bbox[2] - bbox[0]
+            draw.text((x, y), ch, fill=fill, font=font, anchor=anchor)
+            x += ch_w
+            i += 1
+
+    img = Image.new('RGBA', (W, H), (26, 26, 46, 255))
+    draw = ImageDraw.Draw(img)
+
+    # 标题 (居中)
+    title = f"{stock_name} ({stock_code})  双底突破  评分:{score}/100"
+    _draw_text(draw, (W//2, 8), title, (224, 224, 224, 255), f_title_l, f_title_c, anchor='mt')
+
+    # 网格 + 价格标签
+    for i in range(6):
+        gp = min_p + (max_p - min_p) / 5 * i
+        yy = py(gp)
+        draw.line([(margin['left'], yy), (W - margin['right'], yy)], fill=(42, 42, 74), width=1)
+        _draw_text(draw, (margin['left'] - 5, yy), f"{gp:.2f}", (136, 136, 136, 255), f_small_l, f_small_c, anchor='rm')
+
+    # 日期标签
+    step = max(1, n // 8)
+    for i in range(0, n, step):
+        label = f"{dates[i][:4]}-{dates[i][4:6]}-{dates[i][6:]}"
+        _draw_text(draw, (px(i), margin['top'] + price_h + 15), label, (136, 136, 136, 255), f_small_l, f_small_c, anchor='mt')
+
+    # 双底区域高亮
+    hl_start = max(0, pattern['left_idx'] - 10)
+    hl_end = min(n - 1, pattern['right_idx'] + 10)
+    draw.rectangle(
+        [px(hl_start), margin['top'], px(hl_end), margin['top'] + price_h + gap_h + vol_h],
+        fill=(76, 175, 80, 20)
+    )
+
+    # 成交量柱
+    for i in range(n):
+        bar_w = max(1, int(chart_w / n * 0.7))
+        x = px(i) - bar_w // 2
+        y = vy(volumes[i])
+        bh = margin['top'] + price_h + gap_h + vol_h - y
+        color = (76, 175, 80, 128) if closes[i] >= (closes[i-1] if i > 0 else closes[i]) else (244, 67, 54, 128)
+        draw.rectangle([x, y, x + bar_w, y + bh], fill=color)
+
+    # 价格线
+    pts = [(px(i), py(closes[i])) for i in range(n)]
+    draw.line(pts, fill=(33, 150, 243, 255), width=2)
+
+    # 颈线 & 目标
+    neck_price = pattern['neck_price']
+    current_price = closes[-1]
+    min_bottom = min(pattern['left_price'], pattern['right_price'])
+    target = neck_price + (neck_price - min_bottom)
+
+    ny = py(neck_price)
+    draw.line([(margin['left'], ny), (W - margin['right'], ny)], fill=(244, 67, 54, 255), width=2)
+    _draw_text(draw, (W - margin['right'] + 5, ny), f"颈线 {neck_price:.2f}", (244, 67, 54, 255), f_small_l, f_small_c, anchor='lm')
+
+    if target < max_p * 1.1:
+        ty = py(target)
+        for dx in range(margin['left'], W - margin['right'], 10):
+            draw.line([(dx, ty), (dx + 5, ty)], fill=(255, 152, 0, 255), width=1)
+        _draw_text(draw, (W - margin['right'] + 5, ty), f"目标 {target:.2f}", (255, 152, 0, 255), f_small_l, f_small_c, anchor='lm')
+
+    # 左底标记
+    lx, lpy = px(pattern['left_idx']), py(pattern['left_price'])
+    draw.ellipse([lx-6, lpy-6, lx+6, lpy+6], fill=(76, 175, 80, 255), outline=(255, 255, 255), width=2)
+    _draw_text(draw, (lx, lpy + 20), "左底", (76, 175, 80, 255), f_small_l, f_small_c, anchor='mt')
+
+    # 右底标记
+    rx, rpy = px(pattern['right_idx']), py(pattern['right_price'])
+    draw.ellipse([rx-6, rpy-6, rx+6, rpy+6], fill=(156, 39, 176, 255), outline=(255, 255, 255), width=2)
+    _draw_text(draw, (rx, rpy + 20), "右底", (156, 39, 176, 255), f_small_l, f_small_c, anchor='mt')
+
+    # 突破点
+    bx = px(pattern['break_idx'])
+    draw.ellipse([bx-5, ny-5, bx+5, ny+5], fill=(255, 152, 0, 255), outline=(255, 255, 255, 255), width=2)
+
+    # 现价
+    cpy = py(current_price)
+    draw.line([(px(n-1), cpy), (W - margin['right'], cpy)], fill=(255, 152, 0, 255), width=1)
+    _draw_text(draw, (W - margin['right'] + 5, cpy), f"现价 {current_price:.2f}", (255, 152, 0, 255), f_small_l, f_small_c, anchor='lm')
+
+    # 底部原因
+    base_y = H - margin['bottom'] + 15
+    _draw_text(draw, (margin['left'], base_y), "高分原因:", (224, 224, 224, 255), f_reason_l, f_reason_c)
+    for i, r in enumerate(reasons[:6]):
+        _draw_text(draw, (margin['left'], base_y + 18 + i * 18), f"{i+1}. {r}", (170, 170, 170, 255), f_label_l, f_label_c)
+
+    img.save(save_path, 'PNG')
+
 # ============ 主程序 ============
 
 def main():
@@ -425,26 +566,21 @@ def main():
         days_ago = len(item['df']) - 1 - p['break_idx']
         print(f"  {i+1}. {item['name']} ({item['code']}) 评分:{item['score']} 突破于{p['break_date']} ({days_ago}天前)")
     
-    print(f"\n[4/4] 生成图片...")
-    output_svg = os.path.expanduser('~/double_bottom_charts_20260520')
+    print(f"\n[4/4] 生成图表...")
+    output_svg = os.path.expanduser('~/double_bottom_charts_20260521')
+    output_png = os.path.expanduser('~/double_bottom_charts_20260521_png')
     os.makedirs(output_svg, exist_ok=True)
-    
+    os.makedirs(output_png, exist_ok=True)
+
+    png_paths = []
     for i, item in enumerate(top5):
         svg_path = os.path.join(output_svg, f'top{i+1}_{item["code"]}.svg')
+        png_path = os.path.join(output_png, f'top{i+1}_{item["code"]}.png')
         draw_svg_chart(item['df'], item['pattern'], item['score'], item['reasons'], item['name'], item['code'], svg_path)
+        draw_png_chart(item['df'], item['pattern'], item['score'], item['reasons'], item['name'], item['code'], png_path)
         print(f"  SVG: {svg_path}")
-    
-# 转 PNG
-    output_png = os.path.expanduser('~/double_bottom_charts_20260520_png')
-    os.makedirs(output_png, exist_ok=True)
-    png_paths = []
-    for f in sorted(os.listdir(output_svg)):
-        if f.endswith('.svg'):
-            png_file = f.replace('.svg', '.png')
-            png_path = os.path.join(output_png, png_file)
-            os.system(f'magick "{os.path.join(output_svg, f)}" "{png_path}" 2>&1')
-            if os.path.exists(png_path):
-                png_paths.append(png_path)
+        print(f"  PNG: {png_path}")
+        png_paths.append(png_path)
 
     print(f"\n完成! PNG保存在: {output_png}")
     print("=" * 50)
@@ -514,13 +650,28 @@ def _send_wecom_summary(top5: list, png_paths: list | None = None):
 
     send_markdown("\n".join(lines))
 
-    # 发送 PNG 图片
+    # 发送图表
+    # 优先发 PNG，没有则发 SVG 文件
     if png_paths:
         import time as _time
         for png_path in png_paths:
-            result = send_image_file(png_path)
-            print(f"  图片 {png_path}: {result.get('errmsg', result)}")
-            _time.sleep(0.3)  # 避免频率限制
+            if os.path.exists(png_path):
+                result = send_image_file(png_path)
+                print(f"  图片 {os.path.basename(png_path)}: {result.get('errmsg', result)}")
+                _time.sleep(0.3)
+    else:
+        # 没有 PNG，尝试发送 SVG 文件
+        svg_dir = os.path.expanduser('~/double_bottom_charts_20260521')
+        if os.path.isdir(svg_dir):
+            import time as _time
+            svg_files = sorted([f for f in os.listdir(svg_dir) if f.endswith('.svg')])
+            for svg_file in svg_files:
+                svg_path = os.path.join(svg_dir, svg_file)
+                media_id = upload_file(svg_path)
+                if media_id:
+                    result = send_file(media_id)
+                    print(f"  文件 {svg_file}: {result.get('errmsg', result)}")
+                _time.sleep(0.3)
 
 if __name__ == '__main__':
     main()

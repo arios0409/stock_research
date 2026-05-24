@@ -176,6 +176,7 @@ def draw_chart(winrate_curve, total_signals, save_path):
     cw, ch = W - margin['left'] - margin['right'], H - margin['top'] - margin['bottom']
     
     svg = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}">',
+           '<defs><style>text { font-family: "Droid Sans Fallback", "Noto Sans SC", "WenQuanYi Micro Hei", "Microsoft YaHei", sans-serif; }</style></defs>',
            f'<rect width="{W}" height="{H}" fill="#1a1a2e"/>',
            f'<text x="{W/2}" y="30" text-anchor="middle" font-size="18" fill="#e0e0e0" font-weight="bold">双底突破回测: 胜率-时间曲线</text>',
            f'<text x="{W/2}" y="55" text-anchor="middle" font-size="14" fill="#888">扫描窗口: {SCAN_START} ~ {SCAN_END} | 观测期: {OBS_DAYS}天 | 总信号: {total_signals}</text>']
@@ -218,7 +219,11 @@ def draw_chart(winrate_curve, total_signals, save_path):
     
     svg.append('</svg>')
     with open(save_path.replace('.png', '.svg'), 'w') as f: f.write('\n'.join(svg))
-    os.system(f'magick "{save_path.replace(".png", ".svg")}" "{save_path}" 2>&1')
+    try:
+        import cairosvg
+        cairosvg.svg2png(url=save_path.replace('.png', '.svg'), write_to=save_path)
+    except Exception:
+        os.system(f'magick "{save_path.replace(".png", ".svg")}" "{save_path}" 2>&1')
 
 def main():
     print("获取股票列表...")

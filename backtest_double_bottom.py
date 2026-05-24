@@ -420,6 +420,7 @@ def draw_chart(daily_returns, output_path=None):
     def py_bot(val): return bottom_chart_y + bottom_chart_h - ((val - sh_min) / (sh_max - sh_min)) * bottom_chart_h
     
     svg = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}">',
+           '<defs><style>text { font-family: "Droid Sans Fallback", "Noto Sans SC", "WenQuanYi Micro Hei", "Microsoft YaHei", sans-serif; }</style></defs>',
            f'<rect width="{W}" height="{H}" fill="#0d1117"/>',
            f'<text x="{W/2}" y="24" text-anchor="middle" font-size="18" fill="#e6edf3" font-weight="bold">双底突破策略回测 (2026-01-20 ~ 2026-03-10)</text>']
     
