@@ -570,6 +570,49 @@ def compute_industry_volume_ratio(industry_stocks_dict, historical_data):
     return result
 
 
+# ============ 资金流向聚合 ============
+
+def fetch_industry_moneyflow(trade_date, stock_to_ind):
+    """获取个股资金流向并按行业聚合
+    返回: {industry: {'net_amount': 净流入额, 'total_amount': 总成交额, 
+                      'net_rate': 净流入率, 'mf_stocks': [连续5天正流入天数]}}
+    """
+    data = api_call('moneyflow', trade_date=trade_date,
+                    fields='ts_code,buy_lg_amount,sell_lg_amount,'
+                           'buy_elg_amount,sell_elg_amount,net_mf_amount')
+    rows = parse_data(data)
+    if not rows:
+        return {}
+
+    ind_money = {}
+    for r in rows:
+        code = r.get('ts_code', '')
+        ind = stock_to_ind.get(code, '')
+        if not ind:
+            continue
+
+        # 主力净流入 = 大单 + 特大单净流入
+        buy_main = float(r.get('buy_lg_amount', 0)) + float(r.get('buy_elg_amount', 0))
+        sell_main = float(r.get('sell_lg_amount', 0)) + float(r.get('sell_elg_amount', 0))
+        net_mf = float(r.get('net_mf_amount', 0))
+
+        if ind not in ind_money:
+            ind_money[ind] = {'net_amount': 0, 'total_buy': 0, 'total_sell': 0, 'count': 0}
+        ind_money[ind]['net_amount'] += net_mf
+        ind_money[ind]['total_buy'] += buy_main
+        ind_money[ind]['total_sell'] += sell_main
+        ind_money[ind]['count'] += 1
+
+    # 计算净流入率
+    for ind, m in ind_money.items():
+        total_turnover = m['total_buy'] + m['total_sell']
+        if total_turnover > 0:
+            m['net_rate'] = m['net_amount'] / total_turnover * 100  # 百分比
+        else:
+            m['net_rate'] = 0
+    return ind_money
+
+
 # ============ 评分引擎 ============
 
 def calc_rps(values):
@@ -592,19 +635,22 @@ def minmax_norm(values):
 
 
 def score_hot_sectors(industry_stats, multi_period_rets, vol_ratios,
-                      limit_up_industries, hs300_ret):
+                      limit_up_industries, hs300_ret, moneyflow_data=None):
     """
-    六维综合评分
+    八维综合评分
 
-    维度 & 权重:
-      1. 当日超额收益 (25%): vs HS300
-      2. RPS_5D (15%): 5日涨幅百分位
+    维度 & 权重 (新版):
+      1. 当日超额收益 (10%): vs HS300
+      2. RPS_5D (20%): 5日涨幅百分位
       3. RPS_20D (15%): 20日涨幅百分位
-      4. 量比 (15%): 当日量/20日均量
-      5. 涨停密度 (15%): 涨停家数/行业总股数
-      6. 板块宽度 (15%): 上涨股票占比
+      4. 量比 (10%): 当日量/20日均量
+      5. 涨停密度 (10%): 涨停家数/行业总股数
+      6. 板块宽度 (10%): 上涨股票占比
+      7. 主力净流入率 (15%): (大单+特大单净流入)/总成交额
+      8. 资金强度 (10%): 净流入率 * 量比 (量价资金共振)
 
-    返回: [{name, score, daily_ret, rps_5d, rps_20d, vol_ratio, limit_up, breadth, ...}]
+    返回: [{name, score, daily_ret, rps_5d, rps_20d, vol_ratio, limit_up, breadth, 
+             net_mf_rate, mf_score, ...}]
     """
     industries = list(industry_stats.keys())
     if not industries:
@@ -612,11 +658,11 @@ def score_hot_sectors(industry_stats, multi_period_rets, vol_ratios,
 
     n = len(industries)
 
-    # 维度1: 超额收益
+    # 维度1: 超额收益 (权重降低)
     excess_rets = [industry_stats[ind]['avg_ret'] - hs300_ret for ind in industries]
     score_excess = minmax_norm(excess_rets)
 
-    # 维度2: RPS_5D
+    # 维度2: RPS_5D (权重提高)
     rets_5d = [multi_period_rets.get(ind, {}).get('ret_5d', 0) for ind in industries]
     score_rps5 = calc_rps(rets_5d)
 
@@ -626,12 +672,10 @@ def score_hot_sectors(industry_stats, multi_period_rets, vol_ratios,
 
     # 维度4: 量比
     vol_scores = [vol_ratios.get(ind, 1.0) for ind in industries]
-    # 量比太极端没什么意义，cut到[0.5, 5]再归一化
     vol_clipped = [min(max(v, 0.5), 5.0) for v in vol_scores]
     score_vol = minmax_norm(vol_clipped)
 
     # 维度5: 涨停密度
-    total_limit_up = sum(1 for lu_list in limit_up_industries.values() for _ in lu_list)
     score_lu = []
     for ind in industries:
         lu_count = len(limit_up_industries.get(ind, []))
@@ -644,9 +688,31 @@ def score_hot_sectors(industry_stats, multi_period_rets, vol_ratios,
     score_breadth = [industry_stats[ind]['up_ratio'] for ind in industries]
     score_breadth = [min(s, 100) for s in score_breadth]
 
-    # 综合得分
-    weights = {'excess': 0.25, 'rps5': 0.15, 'rps20': 0.15,
-               'vol': 0.15, 'lu': 0.15, 'breadth': 0.15}
+    # 维度7: 主力净流入率
+    if moneyflow_data:
+        mf_rates = [moneyflow_data.get(ind, {}).get('net_rate', 0) for ind in industries]
+        # 净流入率可能是负的，用minmax归一化
+        score_mf = minmax_norm(mf_rates)
+    else:
+        score_mf = [50.0] * n
+
+    # 维度8: 资金强度 = 净流入率 × 量比 (量价资金共振)
+    if moneyflow_data:
+        mf_strength = []
+        for ind in industries:
+            rate = moneyflow_data.get(ind, {}).get('net_rate', 0)
+            vratio = vol_ratios.get(ind, 1.0)
+            # 净流入率为正时放大量比效应，为负时缩小
+            strength = rate * vratio if rate > 0 else rate * min(vratio, 1.0)
+            mf_strength.append(strength)
+        score_mf_strength = minmax_norm(mf_strength)
+    else:
+        score_mf_strength = [50.0] * n
+
+    # 综合得分 (新版权重)
+    weights = {'excess': 0.10, 'rps5': 0.20, 'rps20': 0.15,
+               'vol': 0.10, 'lu': 0.10, 'breadth': 0.10,
+               'mf': 0.15, 'mf_str': 0.10}
     composites = []
     for i in range(n):
         total = (
@@ -656,6 +722,8 @@ def score_hot_sectors(industry_stats, multi_period_rets, vol_ratios,
             + score_vol[i] * weights['vol']
             + score_lu[i] * weights['lu']
             + score_breadth[i] * weights['breadth']
+            + score_mf[i] * weights['mf']
+            + score_mf_strength[i] * weights['mf_str']
         )
         composites.append(total)
 
@@ -664,6 +732,7 @@ def score_hot_sectors(industry_stats, multi_period_rets, vol_ratios,
     for i, ind in enumerate(industries):
         st = industry_stats[ind]
         lu_count = len(limit_up_industries.get(ind, []))
+        mf_rate = moneyflow_data.get(ind, {}).get('net_rate', 0) if moneyflow_data else 0
         scored.append({
             'name': ind,
             'score': round(composites[i], 1),
@@ -677,6 +746,8 @@ def score_hot_sectors(industry_stats, multi_period_rets, vol_ratios,
             'stock_count': st['stock_count'],
             'ret_5d': round(multi_period_rets.get(ind, {}).get('ret_5d', 0), 2),
             'ret_20d': round(multi_period_rets.get(ind, {}).get('ret_20d', 0), 2),
+            'net_mf_rate': round(mf_rate, 2),
+            'mf_score': round(score_mf[i], 1),
         })
 
     scored.sort(key=lambda x: x['score'], reverse=True)
@@ -828,8 +899,8 @@ def render_results(scored, continuity, trade_date, hs300_ret, show_all=False,
     # ---- 热门板块 Top 15 ----
     display_n = len(scored) if show_all else min(15, len(scored))
     print(f'  {"排":>3} {"行业":<8} {"得分":>5} {"涨幅%":>6} {"超额":>6} '
-          f'{"RPS5":>4} {"RPS20":>4} {"量比":>4} {"涨停":>4} {"宽度%":>5} {"热力":<10}')
-    print(f'  {"-"*70}')
+          f'{"RPS5":>4} {"RPS20":>4} {"量比":>4} {"净流":>6} {"涨停":>4} {"宽度%":>5} {"热力":<10}')
+    print(f'  {"-"*80}')
 
     for rank, s in enumerate(scored[:display_n], 1):
         ind = s['name']
@@ -842,13 +913,15 @@ def render_results(scored, continuity, trade_date, hs300_ret, show_all=False,
         lu_str = f'{s["limit_up"]}' if s['limit_up'] > 0 else ''
 
         # 终端输出（ANSI颜色会增加显示长度，用空格补偿）
+        mf_str = f'{s["net_mf_rate"]:>+5.1f}' if 'net_mf_rate' in s else ''
         print(f'{color}  {rank:>2} {ind:<8} {s["score"]:>4.0f} '
               f'{s["daily_ret"]:>+5.2f} {s["excess_ret"]:>+5.2f} '
               f'{s["rps_5d"]:>3.0f} {s["rps_20d"]:>3.0f} '
-              f'{s["vol_ratio"]:>3.1f} {lu_str:>4} '
+              f'{s["vol_ratio"]:>3.1f} {mf_str:>6} '
+              f'{lu_str:>4} '
               f'{s["breadth"]:>4.0f} {status:<10}{reset}')
 
-    print(f'  {"-"*70}')
+    print(f'  {"-"*80}')
     print(f'  🔴 前3  🟡 4-5  🟢 6-10\n')
 
     # ---- 热门板块概况 ----
@@ -866,7 +939,7 @@ def render_results(scored, continuity, trade_date, hs300_ret, show_all=False,
         print(f'     综合 {s["score"]:.0f}分  |  当日 {s["daily_ret"]:+.2f}% '
               f'(超额 {s["excess_ret"]:+.2f}%)')
         print(f'     RPS_5D={s["rps_5d"]:.0f}  RPS_20D={s["rps_20d"]:.0f}  '
-              f'量比={s["vol_ratio"]:.1f}x')
+              f'量比={s["vol_ratio"]:.1f}x  主力净流={s["net_mf_rate"]:+.1f}%')
         print(f'     涨停 {s["limit_up"]}家  |  宽度 {s["breadth"]:.0f}% '
               f'({s["stock_count"]}只)')
         print(f'     5日涨幅 {s["ret_5d"]:+.2f}%  20日涨幅 {s["ret_20d"]:+.2f}%  '
@@ -922,13 +995,14 @@ def save_csv(scored, continuity, trade_date):
     os.makedirs(outdir, exist_ok=True)
     path = os.path.join(outdir, f'hot_sectors_{trade_date}.csv')
 
-    header = '排名,行业,综合得分,当日涨幅%,超额收益%,RPS_5D,RPS_20D,量比,涨停数,板块宽度%,5日涨幅%,20日涨幅%,热度状态,个股数'
+    header = '排名,行业,综合得分,当日涨幅%,超额收益%,RPS_5D,RPS_20D,量比,主力净流入%,涨停数,板块宽度%,5日涨幅%,20日涨幅%,热度状态,个股数'
     lines = [header]
     for i, s in enumerate(scored, 1):
         c = continuity.get(s['name'], {})
         lines.append(
             f'{i},{s["name"]},{s["score"]},{s["daily_ret"]:.2f},{s["excess_ret"]:.2f},'
-            f'{s["rps_5d"]:.1f},{s["rps_20d"]:.1f},{s["vol_ratio"]:.2f},{s["limit_up"]},'
+            f'{s["rps_5d"]:.1f},{s["rps_20d"]:.1f},{s["vol_ratio"]:.2f},'
+            f'{s["net_mf_rate"]:.1f},{s["limit_up"]},'
             f'{s["breadth"]:.1f},{s["ret_5d"]:.2f},{s["ret_20d"]:.2f},'
             f'{c.get("status","")},{s["stock_count"]}'
         )
@@ -1027,6 +1101,15 @@ def main():
         vol_ratios = compute_industry_volume_ratio(industry_stocks, historical_data)
         print(f'  → {len(vol_ratios)} 个行业\n', file=sys.stderr)
 
+    # ---- 步骤7c: 获取资金流向 ----
+    print('==> 步骤7c: 获取资金流向...', file=sys.stderr)
+    moneyflow_data = fetch_industry_moneyflow(trade_date, stock_to_ind)
+    if moneyflow_data:
+        net_pos = sum(1 for m in moneyflow_data.values() if m.get('net_rate', 0) > 0)
+        print(f'  → {len(moneyflow_data)} 个行业, {net_pos}个净流入\n', file=sys.stderr)
+    else:
+        print(f'  → (无数据，跳过资金流维度)\n', file=sys.stderr)
+
     # ---- 涨停按行业归类 ----
     limit_up_industries = defaultdict(list)
     stock_to_ind_rev = stock_to_ind  # already have this
@@ -1049,10 +1132,10 @@ def main():
     except Exception:
         pass
 
-    # ---- 步骤8: 评分 ----
-    print('==> 步骤8: 六维评分...', file=sys.stderr)
+    # ---- 步骤8: 八维评分 ----
+    print('==> 步骤8: 八维评分(含资金流)...', file=sys.stderr)
     scored = score_hot_sectors(industry_stats, multi_period_rets, vol_ratios,
-                               limit_up_industries, hs300_ret)
+                               limit_up_industries, hs300_ret, moneyflow_data)
     print(f'  → {len(scored)} 个行业完成评分\n', file=sys.stderr)
 
     # ---- 步骤8b: 市场趋势评估 ----
