@@ -99,15 +99,15 @@ for i in range(N, len(close)):
 # ===== 高对比度配色 =====
 c_bg = '#0d1117'
 c_ax = '#161b22'
-c_up = '#00ff41'      # 亮绿
-c_risk = '#ffee00'    # 亮黄
-c_down = '#ff0040'    # 亮红
+c_up = '#00ff00'      # 纯绿
+c_risk = '#ffff00'    # 纯黄
+c_down = '#ff0000'    # 纯红
 c_price = '#ffffff'
-c_k = '#ff8800'       # K线橙
-c_d = '#00bbff'       # D线蓝
-c_j = '#cc88ff'       # J线紫
-c_grid = '#2a2a2a'
-c_label = '#cccccc'
+c_k = '#ff9900'       # K线橙
+c_d = '#33ddff'       # D线亮蓝
+c_j = '#dd88ff'       # J线亮紫
+c_grid = '#333333'
+c_label = '#dddddd'
 
 sn = {0:"—", 1:"↑上升", 2:"⚠风险", 3:"↓下降"}
 sc = {0:c_label, 1:c_up, 2:c_risk, 3:c_down}
@@ -123,7 +123,7 @@ ax2 = fig.add_axes([0.07, 0.14, 0.90, 0.22], facecolor=c_ax)  # 25%
 ax3 = fig.add_axes([0.07, 0.02, 0.90, 0.10], facecolor=c_ax)  # 15%
 
 # ===== 子图1：上证指数 + 状态区间 =====
-ax1.plot(dates, close, color=c_price, linewidth=1.3, alpha=0.85, label='上证指数')
+ax1.plot(dates, close, color=c_price, linewidth=1.6, alpha=0.95, label='上证指数')
 
 # 状态区间背景（按概率调整透明度） + 顶部标签
 i = N
@@ -139,14 +139,14 @@ while i < len(close):
     # 根据该区间平均概率决定透明度
     if s == 1:
         avg_p = np.mean(p_up[i:j])
-        alpha = 0.06 + (avg_p - 55) / 37 * 0.30  # P_up 55→92 → α 0.06→0.36
+        alpha = 0.10 + (avg_p - 55) / 37 * 0.38  # P_up 55→92 → α 0.10→0.48
     elif s == 2:
         avg_p = np.mean(p_risk[i:j])
-        alpha = 0.06 + (avg_p - 50) / 38 * 0.30  # P_risk 50→88
+        alpha = 0.10 + (avg_p - 50) / 38 * 0.38  # P_risk 50→88
     elif s == 3:
         avg_p = np.mean(p_down[i:j])
-        alpha = 0.06 + (avg_p - 50) / 38 * 0.30  # P_down 50→88
-    alpha = max(0.04, min(0.42, alpha))
+        alpha = 0.10 + (avg_p - 50) / 38 * 0.38  # P_down 50→88
+    alpha = max(0.06, min(0.55, alpha))
     
     ax1.axvspan(dates[i], dates[j-1], alpha=alpha, color=sc[s], zorder=0)
     
@@ -162,20 +162,20 @@ while i < len(close):
 ax1.set_ylim(2500, 4400)
 ax1.set_ylabel('上证指数', color=c_label, fontsize=11)
 ax1.tick_params(colors=c_label, labelsize=9)
-ax1.grid(True, alpha=0.12, color=c_grid)
+ax1.grid(True, alpha=0.08, color=c_grid)
 ax1.set_xlim(dates[0], dates[-1])
 ax1.set_xticklabels([])  # 子图2显示时间轴
 
 # ===== 子图2：KDJ + 信号标记 =====
-ax2.plot(dates, k, color=c_k, linewidth=1.2, alpha=0.85, label=f'K({M1})')
-ax2.plot(dates, d, color=c_d, linewidth=1.2, alpha=0.85, label=f'D({M2})')
-ax2.plot(dates, 3*k-2*d, color=c_j, linewidth=0.7, alpha=0.5, label='J')
+ax2.plot(dates, k, color=c_k, linewidth=1.5, alpha=0.9, label=f'K({M1})')
+ax2.plot(dates, d, color=c_d, linewidth=1.5, alpha=0.9, label=f'D({M2})')
+ax2.plot(dates, 3*k-2*d, color=c_j, linewidth=0.8, alpha=0.5, label='J')
 
 # 参考线
-ax2.axhline(y=85, color=c_risk, linestyle='--', alpha=0.3, linewidth=0.7)
-ax2.axhline(y=35, color=c_down, linestyle='--', alpha=0.3, linewidth=0.7)
-ax2.axhline(y=20, color=c_up, linestyle=':', alpha=0.25, linewidth=0.6)
-ax2.axhline(y=80, color=c_risk, linestyle=':', alpha=0.25, linewidth=0.6)
+ax2.axhline(y=85, color=c_risk, linestyle='--', alpha=0.4, linewidth=1.0)
+ax2.axhline(y=35, color=c_down, linestyle='--', alpha=0.4, linewidth=1.0)
+ax2.axhline(y=20, color=c_up, linestyle=':', alpha=0.3, linewidth=0.8)
+ax2.axhline(y=80, color=c_risk, linestyle=':', alpha=0.3, linewidth=0.8)
 
 ax2.text(dates[-1], 86, '超买85', color='#ffee00', fontsize=7, alpha=0.6)
 ax2.text(dates[-1], 33, '危险35', color=c_down, fontsize=7, alpha=0.6)
@@ -184,28 +184,28 @@ ax2.text(dates[-1], 33, '危险35', color=c_down, fontsize=7, alpha=0.6)
 for idx, fs, ts, trig in transitions:
     y_k = k[idx]
     if trig == "金叉":
-        ax2.scatter(dates[idx], y_k, color=c_up, s=50, marker='^', zorder=6, edgecolors='white', linewidth=0.5)
+        ax2.scatter(dates[idx], y_k, color=c_up, s=70, marker='^', zorder=6, edgecolors='white', linewidth=0.8)
         ax2.annotate('金叉',
                     xy=(dates[idx], y_k),
-                    xytext=(dates[idx], y_k + 18),
-                    fontsize=7, color=c_up, fontweight='bold', ha='center',
-                    arrowprops=dict(arrowstyle='->', color=c_up, lw=1.3),
+                    xytext=(dates[idx], y_k + 20),
+                    fontsize=7.5, color=c_up, fontweight='bold', ha='center',
+                    arrowprops=dict(arrowstyle='->', color=c_up, lw=1.5),
                     bbox=dict(boxstyle='round,pad=0.15', facecolor=c_bg, edgecolor=c_up, alpha=0.9))
     elif trig == "高位死叉":
-        ax2.scatter(dates[idx], y_k, color=c_risk, s=50, marker='v', zorder=6, edgecolors='white', linewidth=0.5)
+        ax2.scatter(dates[idx], y_k, color=c_risk, s=70, marker='v', zorder=6, edgecolors='white', linewidth=0.8)
         ax2.annotate('高位死叉',
                     xy=(dates[idx], y_k),
-                    xytext=(dates[idx], y_k - 18),
-                    fontsize=7, color=c_risk, fontweight='bold', ha='center', va='top',
-                    arrowprops=dict(arrowstyle='->', color=c_risk, lw=1.3),
+                    xytext=(dates[idx], y_k - 22),
+                    fontsize=7.5, color=c_risk, fontweight='bold', ha='center', va='top',
+                    arrowprops=dict(arrowstyle='->', color=c_risk, lw=1.5),
                     bbox=dict(boxstyle='round,pad=0.15', facecolor=c_bg, edgecolor=c_risk, alpha=0.9))
     elif trig == "K<35&D<40":
-        ax2.scatter(dates[idx], y_k, color=c_down, s=50, marker='s', zorder=6, edgecolors='white', linewidth=0.5)
+        ax2.scatter(dates[idx], y_k, color=c_down, s=70, marker='s', zorder=6, edgecolors='white', linewidth=0.8)
         ax2.annotate('K<35&D<40',
                     xy=(dates[idx], y_k),
-                    xytext=(dates[idx], y_k - 18),
-                    fontsize=7, color=c_down, fontweight='bold', ha='center', va='top',
-                    arrowprops=dict(arrowstyle='->', color=c_down, lw=1.3),
+                    xytext=(dates[idx], y_k - 22),
+                    fontsize=7.5, color=c_down, fontweight='bold', ha='center', va='top',
+                    arrowprops=dict(arrowstyle='->', color=c_down, lw=1.5),
                     bbox=dict(boxstyle='round,pad=0.15', facecolor=c_bg, edgecolor=c_down, alpha=0.9))
 
 ax2.set_ylabel('KDJ', color=c_label, fontsize=11)
