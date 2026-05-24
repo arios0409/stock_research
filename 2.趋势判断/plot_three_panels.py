@@ -125,18 +125,39 @@ ax3 = fig.add_axes([0.07, 0.02, 0.90, 0.10], facecolor=c_ax)  # 15%
 # ===== 子图1：上证指数 + 状态区间 =====
 ax1.plot(dates, close, color=c_price, linewidth=1.3, alpha=0.85, label='上证指数')
 
-# 状态区间背景 + 顶部标签
-for i in range(N, len(close)):
-    if state[i] > 0 and state[i] != state[i-1]:
-        j = i
-        while j < len(close) and state[j] == state[i]:
-            j += 1
-        ax1.axvspan(dates[i], dates[j-1], alpha=0.12, color=sc[state[i]], zorder=0)
-        mid = i + (j-i)//2
-        if mid < len(close):
-            ax1.text(dates[mid], 4320, sn[state[i]], color=sc[state[i]], fontsize=10,
-                    fontweight='bold', ha='center', va='top',
-                    bbox=dict(boxstyle='round,pad=0.2', facecolor=c_bg, edgecolor=sc[state[i]], alpha=0.85))
+# 状态区间背景（按概率调整透明度） + 顶部标签
+i = N
+while i < len(close):
+    if state[i] == 0:
+        i += 1
+        continue
+    s = state[i]
+    j = i
+    while j < len(close) and state[j] == s:
+        j += 1
+    
+    # 根据该区间平均概率决定透明度
+    if s == 1:
+        avg_p = np.mean(p_up[i:j])
+        alpha = 0.04 + (avg_p - 55) / 37 * 0.22  # P_up 55→92 → α 0.04→0.26
+    elif s == 2:
+        avg_p = np.mean(p_risk[i:j])
+        alpha = 0.04 + (avg_p - 50) / 38 * 0.22  # P_risk 50→88
+    elif s == 3:
+        avg_p = np.mean(p_down[i:j])
+        alpha = 0.04 + (avg_p - 50) / 38 * 0.22  # P_down 50→88
+    alpha = max(0.03, min(0.35, alpha))
+    
+    ax1.axvspan(dates[i], dates[j-1], alpha=alpha, color=sc[s], zorder=0)
+    
+    # 标签
+    mid = i + (j-i)//2
+    if mid < len(close):
+        prob_text = f"{avg_p:.0f}%"
+        ax1.text(dates[mid], 4320, f"{sn[s]} {prob_text}", color=sc[s], fontsize=9,
+                fontweight='bold', ha='center', va='top',
+                bbox=dict(boxstyle='round,pad=0.2', facecolor=c_bg, edgecolor=sc[s], alpha=0.85))
+    i = j
 
 ax1.set_ylim(2500, 4400)
 ax1.set_ylabel('上证指数', color=c_label, fontsize=11)
