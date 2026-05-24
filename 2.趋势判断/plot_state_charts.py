@@ -192,20 +192,26 @@ for i in range(N, len(close)):
             j += 1
         ax2.axvspan(dates[i], dates[j-1], alpha=0.06, color=sc[state[i]], zorder=0)
 
-# 标注状态迁移点（只保留有明确信号的切换）
+# 标注状态迁移点（只保留有明确信号的切换，交替上下偏移避免重叠）
 sv = {1:"↑", 2:"⚠", 3:"↓"}
 signal_triggers = {"金叉", "高位死叉", "K<35&D<40"}
+annot_idx = 0
 for idx, fs, ts, trig, pv in transitions:
     if trig not in signal_triggers:
-        continue  # 跳过无信号的概率切换
+        continue
     y_val = p_up[idx] if ts == 1 else (p_risk[idx] if ts == 2 else p_down[idx])
+    
+    # 交替偏移：奇数次向上，偶数次向下
+    offset_y = 22 if annot_idx % 2 == 0 else -18
+    va = 'bottom' if annot_idx % 2 == 0 else 'top'
+    annot_idx += 1
     
     ax2.annotate(f'{sv[fs]}→{sv[ts]}\n{trig}',
                 xy=(dates[idx], y_val),
-                xytext=(dates[idx], y_val + 18),
-                fontsize=8, color=sc[ts], fontweight='bold', ha='center',
-                arrowprops=dict(arrowstyle='->', color=sc[ts], lw=1.5),
-                bbox=dict(boxstyle='round,pad=0.2', facecolor='#0d1117', edgecolor=sc[ts], alpha=0.8))
+                xytext=(dates[idx], y_val + offset_y),
+                fontsize=7.5, color=sc[ts], fontweight='bold', ha='center', va=va,
+                arrowprops=dict(arrowstyle='->', color=sc[ts], lw=1.2),
+                bbox=dict(boxstyle='round,pad=0.15', facecolor='#0d1117', edgecolor=sc[ts], alpha=0.8))
 
 ax2.set_title('KDJ概率趋势系统 — 状态迁移标注', fontsize=15, color='#e6edf3', fontweight='bold')
 ax2.legend(loc='upper left', fontsize=9, facecolor='#0d1117', edgecolor='#30363d', labelcolor='#e6edf3')
