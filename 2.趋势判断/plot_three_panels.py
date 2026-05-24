@@ -100,7 +100,7 @@ for i in range(N, len(close)):
 c_bg = '#0d1117'
 c_ax = '#161b22'
 c_up = '#00ff41'      # 亮绿
-c_risk = '#ffaa00'    # 亮橙黄
+c_risk = '#ffee00'    # 亮黄
 c_down = '#ff0040'    # 亮红
 c_price = '#ffffff'
 c_k = '#ff8800'       # K线橙
@@ -139,14 +139,14 @@ while i < len(close):
     # 根据该区间平均概率决定透明度
     if s == 1:
         avg_p = np.mean(p_up[i:j])
-        alpha = 0.04 + (avg_p - 55) / 37 * 0.22  # P_up 55→92 → α 0.04→0.26
+        alpha = 0.06 + (avg_p - 55) / 37 * 0.30  # P_up 55→92 → α 0.06→0.36
     elif s == 2:
         avg_p = np.mean(p_risk[i:j])
-        alpha = 0.04 + (avg_p - 50) / 38 * 0.22  # P_risk 50→88
+        alpha = 0.06 + (avg_p - 50) / 38 * 0.30  # P_risk 50→88
     elif s == 3:
         avg_p = np.mean(p_down[i:j])
-        alpha = 0.04 + (avg_p - 50) / 38 * 0.22  # P_down 50→88
-    alpha = max(0.03, min(0.35, alpha))
+        alpha = 0.06 + (avg_p - 50) / 38 * 0.30  # P_down 50→88
+    alpha = max(0.04, min(0.42, alpha))
     
     ax1.axvspan(dates[i], dates[j-1], alpha=alpha, color=sc[s], zorder=0)
     
@@ -177,8 +177,8 @@ ax2.axhline(y=35, color=c_down, linestyle='--', alpha=0.3, linewidth=0.7)
 ax2.axhline(y=20, color=c_up, linestyle=':', alpha=0.25, linewidth=0.6)
 ax2.axhline(y=80, color=c_risk, linestyle=':', alpha=0.25, linewidth=0.6)
 
-ax2.text(dates[-1], 86, '超买85', color=c_risk, fontsize=7, alpha=0.5)
-ax2.text(dates[-1], 33, '危险35', color=c_down, fontsize=7, alpha=0.5)
+ax2.text(dates[-1], 86, '超买85', color='#ffee00', fontsize=7, alpha=0.6)
+ax2.text(dates[-1], 33, '危险35', color=c_down, fontsize=7, alpha=0.6)
 
 # 标注信号节点：金叉/高位死叉
 for idx, fs, ts, trig in transitions:
