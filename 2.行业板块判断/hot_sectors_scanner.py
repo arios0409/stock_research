@@ -733,6 +733,15 @@ def score_hot_sectors(industry_stats, multi_period_rets, vol_ratios,
         st = industry_stats[ind]
         lu_count = len(limit_up_industries.get(ind, []))
         mf_rate = moneyflow_data.get(ind, {}).get('net_rate', 0) if moneyflow_data else 0
+        # 各维度贡献分 = 得分 × 权重
+        contrib_excess = score_excess[i] * weights['excess']
+        contrib_rps5 = score_rps5[i] * weights['rps5']
+        contrib_rps20 = score_rps20[i] * weights['rps20']
+        contrib_vol = score_vol[i] * weights['vol']
+        contrib_lu = score_lu[i] * weights['lu']
+        contrib_breadth = score_breadth[i] * weights['breadth']
+        contrib_mf = score_mf[i] * weights['mf']
+        contrib_mf_str = score_mf_strength[i] * weights['mf_str']
         scored.append({
             'name': ind,
             'score': round(composites[i], 1),
@@ -748,6 +757,15 @@ def score_hot_sectors(industry_stats, multi_period_rets, vol_ratios,
             'ret_20d': round(multi_period_rets.get(ind, {}).get('ret_20d', 0), 2),
             'net_mf_rate': round(mf_rate, 2),
             'mf_score': round(score_mf[i], 1),
+            # 贡献分解
+            'c_excess': round(contrib_excess, 1),
+            'c_rps5': round(contrib_rps5, 1),
+            'c_rps20': round(contrib_rps20, 1),
+            'c_vol': round(contrib_vol, 1),
+            'c_lu': round(contrib_lu, 1),
+            'c_breadth': round(contrib_breadth, 1),
+            'c_mf': round(contrib_mf, 1),
+            'c_mf_str': round(contrib_mf_str, 1),
         })
 
     scored.sort(key=lambda x: x['score'], reverse=True)
@@ -942,6 +960,23 @@ def render_results(scored, continuity, trade_date, hs300_ret, show_all=False,
               f'量比={s["vol_ratio"]:.1f}x  主力净流={s["net_mf_rate"]:+.1f}%')
         print(f'     涨停 {s["limit_up"]}家  |  宽度 {s["breadth"]:.0f}% '
               f'({s["stock_count"]}只)')
+        # 贡献分解
+        contribs = [
+            ('RPS5', s['c_rps5'], s['c_rps5'] >= 10),
+            ('RPS20', s['c_rps20'], s['c_rps20'] >= 7.5),
+            ('净流入', s['c_mf'], s['c_mf'] >= 7.5),
+            ('量比', s['c_vol'], s['c_vol'] >= 5),
+            ('超额', s['c_excess'], s['c_excess'] >= 5),
+            ('涨停', s['c_lu'], s['c_lu'] >= 5),
+            ('宽度', s['c_breadth'], s['c_breadth'] >= 5),
+            ('资强度', s['c_mf_str'], s['c_mf_str'] >= 5),
+        ]
+        pos = [f'{n}+{c:.0f}' for n, c, good in contribs if good]
+        neg = [f'{n}-{5-c:.0f}' if c < 5 else f'{n}{c:.0f}' for n, c, good in contribs if not good and c < 8]
+        pos_str = '  '.join(pos) if pos else '—'
+        neg_str = '  '.join(neg) if neg else '—'
+        print(f'     ✅拉升: {pos_str}')
+        print(f'     ❌拖累: {neg_str}')
         print(f'     5日涨幅 {s["ret_5d"]:+.2f}%  20日涨幅 {s["ret_20d"]:+.2f}%  '
               f'趋势 {trend_symbol} {con.get("status", "")}')
     print()
