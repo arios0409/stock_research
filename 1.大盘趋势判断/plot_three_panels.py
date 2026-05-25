@@ -20,7 +20,7 @@ plt.rcParams['axes.unicode_minus'] = False
 # ===== 数据 =====
 TOKEN = "0265861c3dee65908f646a7c9e01f759ebda32a742b1728f92a7ad60"
 pro = ts.pro_api(TOKEN)
-df = pro.index_daily(ts_code="000001.SH", start_date="20240801", end_date="20260520")
+df = pro.index_daily(ts_code="000001.SH", start_date="20240801", end_date="20260525")
 df = df.sort_values("trade_date").reset_index(drop=True)
 close = df["close"].values; high = df["high"].values; low = df["low"].values
 opens = df["open"].values; vol = df["vol"].values
@@ -240,7 +240,7 @@ ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
 ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
 plt.setp(ax2.xaxis.get_majorticklabels(), rotation=30, ha='right', fontsize=8, color=c_label)
 
-output_path = '/mnt/e/Hermes_workspace/stock_research/2.趋势判断/图3_三子图_高对比.png'
+output_path = '/mnt/e/Hermes_workspace/stock_research/1.大盘趋势判断/图3_三子图_高对比.png'
 fig.savefig(output_path, dpi=150, facecolor=c_bg)
 plt.close(fig)
 print(f"✅ 已保存: {output_path}")

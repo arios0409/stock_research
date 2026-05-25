@@ -1,0 +1,12 @@
+# 生成图表/缓存
+*.png
+*.pyc
+__pycache__/
+*.pyo
+
+# 扫描报告
+reports/
+*.csv
+
+# 临时脚本
+*.tmp
