@@ -20,7 +20,7 @@ plt.rcParams['axes.unicode_minus'] = False
 # ===== 数据 =====
 TOKEN = "0265861c3dee65908f646a7c9e01f759ebda32a742b1728f92a7ad60"
 pro = ts.pro_api(TOKEN)
-df = pro.index_daily(ts_code="000001.SH", start_date="20240801", end_date="20260525")
+df = pro.index_daily(ts_code="000001.SH", start_date="20240801", end_date="20260313")
 df = df.sort_values("trade_date").reset_index(drop=True)
 close = df["close"].values; high = df["high"].values; low = df["low"].values
 opens = df["open"].values; vol = df["vol"].values
@@ -125,7 +125,7 @@ ax3 = fig.add_axes([0.07, 0.02, 0.90, 0.10], facecolor=c_ax)  # 15%
 # ===== 子图1：上证指数 + 状态区间 =====
 ax1.plot(dates, close, color=c_price, linewidth=1.6, alpha=0.95, label='上证指数')
 
-# 状态区间背景（按概率调整透明度） + 顶部标签
+# 状态区间背景（按当日概率逐日绘制透明度） + 顶部标签
 i = N
 while i < len(close):
     if state[i] == 0:
@@ -135,23 +135,25 @@ while i < len(close):
     j = i
     while j < len(close) and state[j] == s:
         j += 1
-    
-    # 根据该区间平均概率决定透明度
-    if s == 1:
-        avg_p = np.mean(p_up[i:j])
-        alpha = 0.10 + (avg_p - 55) / 37 * 0.38  # P_up 55→92 → α 0.10→0.48
-    elif s == 2:
-        avg_p = np.mean(p_risk[i:j])
-        alpha = 0.10 + (avg_p - 50) / 38 * 0.38  # P_risk 50→88
-    elif s == 3:
-        avg_p = np.mean(p_down[i:j])
-        alpha = 0.10 + (avg_p - 50) / 38 * 0.38  # P_down 50→88
-    alpha = max(0.06, min(0.55, alpha))
-    
-    ax1.axvspan(dates[i], dates[j-1], alpha=alpha, color=sc[s], zorder=0)
-    
-    # 标签
-    mid = i + (j-i)//2
+
+    # 逐日绘制，每根柱子用当日概率决定透明度
+    for idx in range(i, j):
+        if s == 1:
+            p_val = p_up[idx]
+            alpha = 0.10 + (p_val - 55) / 37 * 0.38 if p_val > 55 else 0.06
+        elif s == 2:
+            p_val = p_risk[idx]
+            alpha = 0.10 + (p_val - 50) / 38 * 0.38 if p_val > 50 else 0.06
+        elif s == 3:
+            p_val = p_down[idx]
+            alpha = 0.10 + (p_val - 50) / 38 * 0.38 if p_val > 50 else 0.06
+        alpha = max(0.06, min(0.55, alpha))
+        if idx < len(close) - 1:
+            ax1.axvspan(dates[idx], dates[idx+1], alpha=alpha, color=sc[s], zorder=0)
+
+    # 标签（用该区间平均概率）
+    avg_p = np.mean(p_up[i:j] if s == 1 else (p_risk[i:j] if s == 2 else p_down[i:j]))
+    mid = i + (j - i) // 2
     if mid < len(close):
         prob_text = f"{avg_p:.0f}%"
         ax1.text(dates[mid], 4320, f"{sn[s]} {prob_text}", color=sc[s], fontsize=9,
