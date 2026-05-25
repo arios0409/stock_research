@@ -50,7 +50,7 @@ def send_text(content):
     return post({'msgtype': 'text', 'text': {'content': content}})
 
 # ===== 1. 发送策略图 =====
-chart_path = '/mnt/e/Hermes_workspace/stock_research/2.行业板块判断/策略三合一.png'
+chart_path = '/mnt/e/Hermes_workspace/stock_research/2.行业板块判断/20260430_策略三合一.png'
 print('上传策略图...')
 media_id = upload_file(chart_path)
 if media_id:

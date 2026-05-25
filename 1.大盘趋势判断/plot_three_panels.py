@@ -240,7 +240,8 @@ ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
 ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
 plt.setp(ax2.xaxis.get_majorticklabels(), rotation=30, ha='right', fontsize=8, color=c_label)
 
-output_path = '/mnt/e/Hermes_workspace/stock_research/1.大盘趋势判断/图3_三子图_高对比.png'
+last_date = str(df['trade_date'].iloc[-1])
+output_path = f'/mnt/e/Hermes_workspace/stock_research/1.大盘趋势判断/{last_date}_三子图_高对比.png'
 fig.savefig(output_path, dpi=150, facecolor=c_bg)
 plt.close(fig)
 print(f"✅ 已保存: {output_path}")

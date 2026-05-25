@@ -453,7 +453,7 @@ def plot_chart(market, market_dates, daily_nav, daily_pnl, daily_holdings,
     ax3.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
     plt.setp(ax3.xaxis.get_majorticklabels(), rotation=30, ha='right', fontsize=8, color=c_label)
     
-    output = '/mnt/e/Hermes_workspace/stock_research/2.行业板块判断/策略三合一.png'
+    output = f'/mnt/e/Hermes_workspace/stock_research/2.行业板块判断/{END_DATE}_策略三合一.png'
     fig.savefig(output, dpi=150, facecolor=c_bg)
     plt.close(fig)
     print(f'✅ 已保存: {output}')
