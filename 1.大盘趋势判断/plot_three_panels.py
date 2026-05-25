@@ -9,6 +9,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.dates as mdates
+from matplotlib.ticker import FixedLocator, MultipleLocator
 import os
 
 # 字体
@@ -20,7 +21,7 @@ plt.rcParams['axes.unicode_minus'] = False
 # ===== 数据 =====
 TOKEN = "0265861c3dee65908f646a7c9e01f759ebda32a742b1728f92a7ad60"
 pro = ts.pro_api(TOKEN)
-df = pro.index_daily(ts_code="000001.SH", start_date="20240801", end_date="20260313")
+df = pro.index_daily(ts_code="000001.SH", start_date="20240801", end_date="20260525")
 df = df.sort_values("trade_date").reset_index(drop=True)
 close = df["close"].values; high = df["high"].values; low = df["low"].values
 opens = df["open"].values; vol = df["vol"].values
@@ -112,133 +113,174 @@ c_label = '#dddddd'
 sn = {0:"—", 1:"↑上升", 2:"⚠风险", 3:"↓下降"}
 sc = {0:c_label, 1:c_up, 2:c_risk, 3:c_down}
 
+# 子图2用：最近4个月切片（约80个交易日）
+M4_DAYS = 80
+m4_start = max(N, len(close) - M4_DAYS)
+d4 = dates[m4_start:]
+c4 = close[m4_start:]
+st4 = state[m4_start:]
+pu4 = p_up[m4_start:]
+pd4 = p_down[m4_start:]
+pr4 = p_risk[m4_start:]
+
+# 过滤子图2范围内的信号
+t4 = [(idx, fs, ts, trig) for idx, fs, ts, trig in transitions
+      if idx >= m4_start]
+
 # ========================================================
-# 三子图
+# 四子图
 # ========================================================
 fig = plt.figure(figsize=(20, 14), facecolor=c_bg)
 
-# 坐标轴 [left, bottom, width, height]
-ax1 = fig.add_axes([0.07, 0.38, 0.90, 0.58], facecolor=c_ax)  # 60%
-ax2 = fig.add_axes([0.07, 0.14, 0.90, 0.22], facecolor=c_ax)  # 25%
-ax3 = fig.add_axes([0.07, 0.02, 0.90, 0.10], facecolor=c_ax)  # 15%
+# 坐标轴 [left, bottom, width, height] — 同时间轴的放一起
+ax1 = fig.add_axes([0.07, 0.58, 0.90, 0.42], facecolor=c_ax)  # 42% 上证全量
+ax2 = fig.add_axes([0.07, 0.40, 0.90, 0.16], facecolor=c_ax)  # 16% KDJ
+ax3 = fig.add_axes([0.07, 0.22, 0.90, 0.16], facecolor=c_ax)  # 16% 成交量
+ax4 = fig.add_axes([0.07, 0.02, 0.90, 0.18], facecolor=c_ax)  # 18% 上证4月放大
 
-# ===== 子图1：上证指数 + 状态区间 =====
-ax1.plot(dates, close, color=c_price, linewidth=1.6, alpha=0.95, label='上证指数')
+# ---- 通用日期格式 ----
+DATE_FMT = lambda: mdates.DateFormatter('Y%yM%m')  # Y25M06
 
-# 状态区间背景（按概率调整透明度） + 顶部标签
-i = N
-while i < len(close):
-    if state[i] == 0:
-        i += 1
-        continue
-    s = state[i]
-    j = i
-    while j < len(close) and state[j] == s:
-        j += 1
-    
-    # 根据该区间平均概率决定透明度
-    if s == 1:
-        avg_p = np.mean(p_up[i:j])
-        alpha = 0.10 + (avg_p - 55) / 37 * 0.38  # P_up 55→92 → α 0.10→0.48
-    elif s == 2:
-        avg_p = np.mean(p_risk[i:j])
-        alpha = 0.10 + (avg_p - 50) / 38 * 0.38  # P_risk 50→88
-    elif s == 3:
-        avg_p = np.mean(p_down[i:j])
-        alpha = 0.10 + (avg_p - 50) / 38 * 0.38  # P_down 50→88
-    alpha = max(0.06, min(0.55, alpha))
-    
-    ax1.axvspan(dates[i], dates[j-1], alpha=alpha, color=sc[s], zorder=0)
-    
-    # 标签
-    mid = i + (j-i)//2
-    if mid < len(close):
-        prob_text = f"{avg_p:.0f}%"
-        ax1.text(dates[mid], 4320, f"{sn[s]} {prob_text}", color=sc[s], fontsize=9,
-                fontweight='bold', ha='center', va='top',
-                bbox=dict(boxstyle='round,pad=0.2', facecolor=c_bg, edgecolor=sc[s], alpha=0.85))
-    i = j
+# ---- 状态区间绘制函数（通用） ----
+def draw_state_spans(ax, dates_arr, close_arr, state_arr, p_up_arr, p_down_arr, p_risk_arr,
+                     show_label=True, y_label_top=0):
+    """在指定axes上绘制状态区间背景"""
+    ax.plot(dates_arr, close_arr, color=c_price, linewidth=1.6, alpha=0.95)
+    i = 0
+    while i < len(close_arr):
+        if state_arr[i] == 0:
+            i += 1
+            continue
+        s = state_arr[i]
+        j = i
+        while j < len(close_arr) and state_arr[j] == s:
+            j += 1
 
-ax1.set_ylim(2500, 4400)
-ax1.set_ylabel('上证指数', color=c_label, fontsize=11)
-ax1.tick_params(colors=c_label, labelsize=9)
+        for idx in range(i, j):
+            if s == 1:
+                p_val = p_up_arr[idx]
+                alpha = 0.10 + (p_val - 55) / 37 * 0.38 if p_val > 55 else 0.06
+            elif s == 2:
+                p_val = p_risk_arr[idx]
+                alpha = 0.10 + (p_val - 50) / 38 * 0.38 if p_val > 50 else 0.06
+            elif s == 3:
+                p_val = p_down_arr[idx]
+                alpha = 0.10 + (p_val - 50) / 38 * 0.38 if p_val > 50 else 0.06
+            alpha = max(0.06, min(0.55, alpha))
+            if idx < len(close_arr) - 1:
+                ax.axvspan(dates_arr[idx], dates_arr[idx+1], alpha=alpha, color=sc[s],
+                           linewidth=0, zorder=0)
+            else:
+                ax.axvspan(dates_arr[idx], dates_arr[idx], alpha=alpha, color=sc[s],
+                           linewidth=0, zorder=0)
+
+        # 标签
+        if show_label and y_label_top:
+            avg_p = np.mean(p_up_arr[i:j] if s == 1 else (p_risk_arr[i:j] if s == 2 else p_down_arr[i:j]))
+            mid = i + (j - i) // 2
+            if mid < len(close_arr):
+                prob_text = f"{avg_p:.0f}%"
+                ax.text(dates_arr[mid], y_label_top, f"{sn[s]} {prob_text}", color=sc[s], fontsize=9,
+                        fontweight='bold', ha='center', va='top',
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor=c_bg, edgecolor=sc[s], alpha=0.85))
+        i = j
+
+# ===== 子图1：上证指数 + 状态区间 (全量) =====
+y1_min, y1_max = np.min(close), np.max(close)
+y1_range = y1_max - y1_min
+ax1_top = y1_max + y1_range * 0.065   # 标签位置（数据顶+6.5%）
+ax1_lim = y1_max + y1_range * 0.15    # y轴顶（数据顶+15%）
+ax1_bot = y1_min - y1_range * 0.10    # y轴底（数据底-10%）
+draw_state_spans(ax1, dates, close, state, p_up, p_down, p_risk,
+                 show_label=True, y_label_top=ax1_top)
+ax1.set_ylim(ax1_bot, ax1_lim)
+ax1.set_ylabel('上证指数', color=c_label, fontsize=20)
+ax1.tick_params(colors=c_label, labelsize=14)
+ax1.yaxis.set_minor_locator(MultipleLocator(100))
+ax1.tick_params(which='minor', colors=c_label, length=3)
 ax1.grid(True, alpha=0.08, color=c_grid)
 ax1.set_xlim(dates[0], dates[-1])
-ax1.set_xticklabels([])  # 子图2显示时间轴
+ax1.set_xticklabels([])
 
-# ===== 子图2：KDJ + 信号标记 =====
+# ===== 子图2：KDJ + 信号标记 (全量) =====
 ax2.plot(dates, k, color=c_k, linewidth=1.5, alpha=0.9, label=f'K({M1})')
 ax2.plot(dates, d, color=c_d, linewidth=1.5, alpha=0.9, label=f'D({M2})')
 ax2.plot(dates, 3*k-2*d, color=c_j, linewidth=0.8, alpha=0.5, label='J')
-
-# 参考线
 ax2.axhline(y=85, color=c_risk, linestyle='--', alpha=0.4, linewidth=1.0)
 ax2.axhline(y=35, color=c_down, linestyle='--', alpha=0.4, linewidth=1.0)
 ax2.axhline(y=20, color=c_up, linestyle=':', alpha=0.3, linewidth=0.8)
 ax2.axhline(y=80, color=c_risk, linestyle=':', alpha=0.3, linewidth=0.8)
+ax2.text(dates[-1], 86, '超买85', color='#ffee00', fontsize=8, alpha=0.6)
+ax2.text(dates[-1], 33, '危险35', color=c_down, fontsize=8, alpha=0.6)
 
-ax2.text(dates[-1], 86, '超买85', color='#ffee00', fontsize=7, alpha=0.6)
-ax2.text(dates[-1], 33, '危险35', color=c_down, fontsize=7, alpha=0.6)
-
-# 标注信号节点：金叉/高位死叉
 for idx, fs, ts, trig in transitions:
     y_k = k[idx]
     if trig == "金叉":
-        ax2.scatter(dates[idx], y_k, color=c_up, s=70, marker='^', zorder=6, edgecolors='white', linewidth=0.8)
-        ax2.annotate('金叉',
-                    xy=(dates[idx], y_k),
-                    xytext=(dates[idx], y_k + 20),
-                    fontsize=7.5, color=c_up, fontweight='bold', ha='center',
+        ax2.scatter(dates[idx], y_k, color=c_up, s=60, marker='^', zorder=6, edgecolors='white', linewidth=0.8)
+        ax2.annotate('金叉', xy=(dates[idx], y_k), xytext=(dates[idx], y_k + 20),
+                    fontsize=8, color=c_up, fontweight='bold', ha='center',
                     arrowprops=dict(arrowstyle='->', color=c_up, lw=1.5),
                     bbox=dict(boxstyle='round,pad=0.15', facecolor=c_bg, edgecolor=c_up, alpha=0.9))
     elif trig == "高位死叉":
-        ax2.scatter(dates[idx], y_k, color=c_risk, s=70, marker='v', zorder=6, edgecolors='white', linewidth=0.8)
-        ax2.annotate('高位死叉',
-                    xy=(dates[idx], y_k),
-                    xytext=(dates[idx], y_k - 22),
-                    fontsize=7.5, color=c_risk, fontweight='bold', ha='center', va='top',
+        ax2.scatter(dates[idx], y_k, color=c_risk, s=60, marker='v', zorder=6, edgecolors='white', linewidth=0.8)
+        ax2.annotate('高位死叉', xy=(dates[idx], y_k), xytext=(dates[idx], y_k - 22),
+                    fontsize=8, color=c_risk, fontweight='bold', ha='center', va='top',
                     arrowprops=dict(arrowstyle='->', color=c_risk, lw=1.5),
                     bbox=dict(boxstyle='round,pad=0.15', facecolor=c_bg, edgecolor=c_risk, alpha=0.9))
     elif trig == "K<35&D<40":
-        ax2.scatter(dates[idx], y_k, color=c_down, s=70, marker='s', zorder=6, edgecolors='white', linewidth=0.8)
-        ax2.annotate('K<35&D<40',
-                    xy=(dates[idx], y_k),
-                    xytext=(dates[idx], y_k - 22),
-                    fontsize=7.5, color=c_down, fontweight='bold', ha='center', va='top',
+        ax2.scatter(dates[idx], y_k, color=c_down, s=60, marker='s', zorder=6, edgecolors='white', linewidth=0.8)
+        ax2.annotate('K<35&D<40', xy=(dates[idx], y_k), xytext=(dates[idx], y_k - 22),
+                    fontsize=8, color=c_down, fontweight='bold', ha='center', va='top',
                     arrowprops=dict(arrowstyle='->', color=c_down, lw=1.5),
                     bbox=dict(boxstyle='round,pad=0.15', facecolor=c_bg, edgecolor=c_down, alpha=0.9))
 
-ax2.set_ylabel('KDJ', color=c_label, fontsize=11)
-ax2.tick_params(colors=c_label, labelsize=9)
+ax2.set_ylabel('KDJ', color=c_label, fontsize=16)
+ax2.tick_params(colors=c_label, labelsize=12)
 ax2.grid(True, alpha=0.12, color=c_grid)
 ax2.set_ylim(-10, 115)
 ax2.set_xlim(dates[0], dates[-1])
-ax2.legend(loc='upper left', fontsize=8, facecolor=c_bg, edgecolor=c_grid, labelcolor=c_label)
+ax2.set_xticklabels([])
+ax2.legend(loc='upper left', fontsize=9, facecolor=c_bg, edgecolor=c_grid, labelcolor=c_label)
 
-# ===== 子图3：成交量 =====
-vol_colors = [c_down if close[i] >= opens[i] else c_up for i in range(len(df))]
+# ===== 子图3：成交量 (全量) =====
+vol_colors = [c_down if close[i] >= opens[i] else c_up for i in range(len(close))]
 ax3.bar(dates, vol/1e8, color=vol_colors, alpha=0.6, width=0.7)
-ax3.set_ylabel('成交量\n(亿手)', color=c_label, fontsize=10)
-ax3.tick_params(colors=c_label, labelsize=8)
+ax3.set_ylabel('成交量(亿手)', color=c_label, fontsize=16)
+ax3.tick_params(colors=c_label, labelsize=12)
 ax3.grid(True, alpha=0.1, color=c_grid)
 ax3.set_xlim(dates[0], dates[-1])
 
-# 时间轴格式（仅子图3显示）
-ax3.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
-ax3.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
-plt.setp(ax3.xaxis.get_majorticklabels(), rotation=30, ha='right', fontsize=8, color=c_label)
+# 子图3显示共享时间轴 + 5日刻度
+ax3.xaxis.set_major_formatter(DATE_FMT())
+ax3.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+ax3.xaxis.set_minor_locator(mdates.DayLocator(interval=5))
+ax3.tick_params(which='minor', colors=c_label, length=3)
+plt.setp(ax3.xaxis.get_majorticklabels(), rotation=0, ha='center', fontsize=12, color=c_label)
 
-# 对齐X轴
+# 对齐全量子图X轴
 for ax in [ax1, ax2]:
     ax.set_xlim(dates[0], dates[-1])
-    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
-    plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right', fontsize=8, color=c_label)
+    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+    ax.xaxis.set_major_formatter(DATE_FMT())
+    ax.xaxis.set_minor_locator(mdates.DayLocator(interval=5))
+    ax.tick_params(which='minor', colors=c_label, length=3)
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=0, ha='center', fontsize=12, color=c_label)
 
-# 子图2显示时间
-ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
-ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
-plt.setp(ax2.xaxis.get_majorticklabels(), rotation=30, ha='right', fontsize=8, color=c_label)
+# ===== 子图4：上证指数近4月放大 (独立时间轴) =====
+draw_state_spans(ax4, d4, c4, st4, pu4, pd4, pr4,
+                 show_label=True, y_label_top=np.max(c4) + (np.max(c4)-np.min(c4)) * 0.06)
+y_min, y_max = np.min(c4), np.max(c4)
+y_rng = y_max - y_min
+ax4.set_ylim(y_min - y_rng * 0.10, y_max + y_rng * 0.10)
+ax4.set_ylabel('上证指数(近4月)', color=c_label, fontsize=15)
+ax4.tick_params(colors=c_label, labelsize=12)
+ax4.grid(True, alpha=0.08, color=c_grid)
+ax4.set_xlim(d4[0], d4[-1])
+ax4.xaxis.set_major_formatter(DATE_FMT())
+ax4.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+ax4.xaxis.set_minor_locator(mdates.DayLocator(interval=5))
+ax4.tick_params(which='minor', colors=c_label, length=3)
+plt.setp(ax4.xaxis.get_majorticklabels(), rotation=0, ha='center', fontsize=12, color=c_label)
 
 last_date = str(df['trade_date'].iloc[-1])
 output_path = f'/mnt/e/Hermes_workspace/stock_research/1.大盘趋势判断/{last_date}_三子图_高对比.png'
