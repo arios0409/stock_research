@@ -21,7 +21,7 @@ plt.rcParams['axes.unicode_minus'] = False
 # ===== 数据 =====
 TOKEN = "0265861c3dee65908f646a7c9e01f759ebda32a742b1728f92a7ad60"
 pro = ts.pro_api(TOKEN)
-df = pro.index_daily(ts_code="000001.SH", start_date="20240801", end_date="20260525")
+df = pro.index_daily(ts_code="000001.SH", start_date="20240801", end_date="20260526")
 df = df.sort_values("trade_date").reset_index(drop=True)
 close = df["close"].values; high = df["high"].values; low = df["low"].values
 opens = df["open"].values; vol = df["vol"].values
