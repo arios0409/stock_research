@@ -21,6 +21,7 @@ API_URL = 'http://api.tushare.pro'
 END_DATE = '20260415'              # 形态筛选截止日
 START_DATE = '20241001'            # 数据起始（往前多取用于计算指标）
 PLOT_END_DATE = datetime.now().strftime('%Y%m%d')
+SCAN_WINDOW_MONTHS = 3            # 只保留END_DATE前N个月内的形态
 MAX_SCAN = 400
 
 # 旗形参数
@@ -405,6 +406,13 @@ def main():
     output_dir = os.path.join(script_dir, f'{END_DATE}_data')
     os.makedirs(output_dir, exist_ok=True)
 
+    # 计算最早允许的突破日期 (END_DATE - SCAN_WINDOW_MONTHS个月)
+    end_dt = datetime.strptime(END_DATE, '%Y%m%d')
+    earliest_month = end_dt.month - SCAN_WINDOW_MONTHS
+    earliest_year = end_dt.year + (earliest_month - 1) // 12
+    earliest_month = (earliest_month - 1) % 12 + 1
+    earliest_date = f'{earliest_year}{earliest_month:02d}01'
+
     print("=" * 60)
     print("  上升旗形(Bull Flag)中继形态扫描器")
     print(f"  筛选截止: {END_DATE}  图表截止: {PLOT_END_DATE}")
@@ -446,6 +454,8 @@ def main():
             for f in flags:
                 score, reasons = score_pattern(scan_df, f)
                 if score >= 30:
+                    if scan_df[f['breakout_idx']]['trade_date'] < earliest_date:
+                        continue
                     all_patterns.append({
                         'code': code,
                         'name': name,
