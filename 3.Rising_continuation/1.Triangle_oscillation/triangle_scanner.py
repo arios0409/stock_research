@@ -516,6 +516,14 @@ def main():
         print("  未发现符合条件的三角收敛形态")
         return
 
+    # 按股票去重：每只股票只保留得分最高的形态
+    stock_best = {}
+    for item in all_patterns:
+        code = item['code']
+        if code not in stock_best or item['score'] > stock_best[code]['score']:
+            stock_best[code] = item
+    all_patterns = list(stock_best.values())
+
     # 按胜率排序（与原版scan_v3一致）
     all_patterns.sort(key=lambda x: x['pattern']['wr'], reverse=True)
     top5 = all_patterns[:5]
