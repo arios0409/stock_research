@@ -13,13 +13,15 @@ import urllib.request
 import json
 import os
 import time
+from datetime import datetime
 
 # ============ 配置 ============
 TUSHARE_TOKEN = '0265861c3dee65908f646a7c9e01f759ebda32a742b1728f92a7ad60'
 API_URL = 'http://api.tushare.pro'
-END_DATE = '20260513'
-START_DATE = '20250801'  # 提前3个月用于计算60日均量等指标
-MAX_SCAN = 400  # 扫描数量限制
+END_DATE = '20260415'              # 形态筛选截止日
+START_DATE = '20241001'            # 数据起始（往前多取用于计算指标）
+PLOT_END_DATE = datetime.now().strftime('%Y%m%d')
+MAX_SCAN = 400
 
 # 旗形参数
 FLAGPOLE_MIN_DAYS = 5
@@ -62,7 +64,9 @@ def get_hs300_components():
         return None
     return list(set(item[0] for item in result['items']))
 
-def get_daily_data(ts_code, start_date=START_DATE, end_date=END_DATE):
+def get_daily_data(ts_code, start_date=START_DATE, end_date=None):
+    if end_date is None:
+        end_date = PLOT_END_DATE
     result = api_call('daily', ts_code=ts_code, start_date=start_date, end_date=end_date)
     if not result or 'fields' not in result or 'items' not in result:
         return None
@@ -397,10 +401,15 @@ def draw_svg_chart(df, flag, score, reasons, stock_name, stock_code, save_path):
 # ============ 主程序 ============
 
 def main():
-    print("=" * 55)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    output_dir = os.path.join(script_dir, f'{END_DATE}_data')
+    os.makedirs(output_dir, exist_ok=True)
+
+    print("=" * 60)
     print("  上升旗形(Bull Flag)中继形态扫描器")
+    print(f"  筛选截止: {END_DATE}  图表截止: {PLOT_END_DATE}")
     print("  条件: 旗杆涨幅≥20% → 整理缩量 → 放量突破")
-    print("=" * 55)
+    print("=" * 60)
 
     print("\n[1/4] 获取股票列表...")
     stocks = get_stock_list()
@@ -422,20 +431,26 @@ def main():
             print(f"  进度: {idx}/{len(scan_codes)}")
 
         try:
-            df = get_daily_data(code)
-            if not df or len(df) < 60:
+            plot_df = get_daily_data(code)  # 拉到当前日期，用于画图
+            if not plot_df or len(plot_df) < 60:
                 continue
 
-            flags = detect_bull_flag(df)
+            # 截取到END_DATE用于形态检测
+            scan_df = [d for d in plot_df if d['trade_date'] <= END_DATE]
+            if len(scan_df) < 60:
+                continue
+
+            flags = detect_bull_flag(scan_df)
             name = stock_map.get(code, code)
 
             for f in flags:
-                score, reasons = score_pattern(df, f)
+                score, reasons = score_pattern(scan_df, f)
                 if score >= 30:
                     all_patterns.append({
                         'code': code,
                         'name': name,
-                        'df': df,
+                        'plot_df': plot_df,
+                        'scan_df': scan_df,
                         'flag': f,
                         'score': score,
                         'reasons': reasons
@@ -452,7 +467,7 @@ def main():
             stock_best[code] = item
     all_patterns = list(stock_best.values())
 
-    all_patterns.sort(key=lambda x: (len(x['df']) - 1 - x['flag']['breakout_idx'], -x['score']))
+    all_patterns.sort(key=lambda x: (len(x['scan_df']) - 1 - x['flag']['breakout_idx'], -x['score']))
     top5 = all_patterns[:5]
 
     if not top5:
@@ -462,24 +477,44 @@ def main():
     print(f"\n[3/4] 前5名:")
     for i, item in enumerate(top5):
         f = item['flag']
-        days_ago = len(item['df']) - 1 - f['breakout_idx']
-        print(f"  {i + 1}. {item['name']} ({item['code']}) 评分:{item['score']} 突破于{item['df'][f['breakout_idx']]['trade_date']} ({days_ago}天前)")
+        days_ago = len(item['scan_df']) - 1 - f['breakout_idx']
+        print(f"  {i + 1}. {item['name']} ({item['code']}) 评分:{item['score']} 突破于{item['scan_df'][f['breakout_idx']]['trade_date']} ({days_ago}天前)")
 
-    print(f"\n[4/4] 生成图片...")
-    output_svg = os.path.expanduser('~/bull_flag_charts')
-    os.makedirs(output_svg, exist_ok=True)
-
+    print(f"\n[4/4] 生成图表...")
     for i, item in enumerate(top5):
-        svg_path = os.path.join(output_svg, f'top{i + 1}_{item["code"]}.svg')
-        draw_svg_chart(item['df'], item['flag'], item['score'], item['reasons'], item['name'], item['code'], svg_path)
-        print(f"  SVG: {svg_path}")
+        svg_path = os.path.join(output_dir, f'top{i + 1}_{item["code"].split(".")[0]}_{item["name"]}.svg')
+        draw_svg_chart(item['plot_df'], item['flag'], item['score'], item['reasons'], item['name'], item['code'], svg_path)
+        print(f"  SVG: {os.path.basename(svg_path)}")
 
-    print(f"\n完成! SVG保存在: {output_svg}")
-    print("=" * 55)
+    # 导出CSV (全部符合条件的结果)
+    csv_path = os.path.join(output_dir, f'results_{END_DATE}.csv')
+    with open(csv_path, 'w', encoding='utf-8-sig') as f:
+        f.write('rank,code,name,score,break_date,pole_start_date,pole_top_date,pole_len,'
+                'flagpole_gain_pct,pullback_pct,flag_len,vol_ratio_pct,flag_upper,current_price,'
+                'dist_pct,target,space_pct,reasons\n')
+        for i, item in enumerate(all_patterns):
+            fl = item['flag']
+            cp = float(item['plot_df'][-1]['close'])
+            dist = (cp - fl['flag_upper']) / fl['flag_upper'] * 100
+            target = fl['flag_upper'] + fl['flagpole_height']
+            space = (target - cp) / cp * 100
+            pullback_pct = (fl['pole_top_price'] - fl['flag_low']) / fl['flagpole_height'] * 100
+            reasons_str = '; '.join(item['reasons'])
+            f.write(f'{i+1},{item["code"]},{item["name"]},{item["score"]},'
+                    f'{item["scan_df"][fl["breakout_idx"]]["trade_date"]},'
+                    f'{item["scan_df"][fl["pole_start"]]["trade_date"]},'
+                    f'{item["scan_df"][fl["pole_top_idx"]]["trade_date"]},{fl["pole_len"]},'
+                    f'{fl["flagpole_gain"]*100:.1f},{pullback_pct:.1f},{fl["flag_len"]},'
+                    f'{fl["vol_ratio"]*100:.1f},{fl["flag_upper"]:.2f},{cp:.2f},'
+                    f'{dist:.1f},{target:.2f},{space:.1f},{reasons_str}\n')
+    print(f"  CSV: {os.path.basename(csv_path)}")
+
+    print(f"\n完成! 图表保存在: {output_dir}")
+    print("=" * 60)
 
     for i, item in enumerate(top5):
         f = item['flag']
-        cp = float(item['df'][-1]['close'])
+        cp = float(item['plot_df'][-1]['close'])
         dist = (cp - f['flag_upper']) / f['flag_upper'] * 100
         target = f['flag_upper'] + f['flagpole_height']
         space = (target - cp) / cp * 100
@@ -489,14 +524,14 @@ def main():
         print(f"  旗杆: +{f['flagpole_gain']:.0%} ({f['pole_len']}天)")
         print(f"  回撤: {(f['pole_top_price'] - f['flag_low']) / f['flagpole_height']:.0%} of 旗杆高度")
         print(f"  整理: {f['flag_len']}天 | 缩量至 {f['vol_ratio']:.0%}")
-        print(f"  突破日: {item['df'][f['breakout_idx']]['trade_date']} (距今{len(item['df']) - 1 - f['breakout_idx']}天)")
+        print(f"  突破日: {item['scan_df'][f['breakout_idx']]['trade_date']} (距今{len(item['scan_df']) - 1 - f['breakout_idx']}天)")
         print(f"  上轨: @{f['flag_upper']:.2f} | 现价: {cp:.2f} (突破后+{dist:.1f}%)")
         print(f"  目标: @{target:.2f} (剩余空间{space:.1f}%)")
         for r in item['reasons']:
             print(f"  + {r}")
 
     if top5:
-        latest_date = top5[0]['df'][-1]['trade_date']
+        latest_date = top5[0]['plot_df'][-1]['trade_date']
         print(f"\n[数据截止日期: {latest_date}]")
 
 if __name__ == '__main__':
