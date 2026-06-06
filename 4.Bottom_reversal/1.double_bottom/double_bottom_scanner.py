@@ -365,22 +365,16 @@ def main():
         print(f"  {i+1}. {item['name']} ({item['code']}) 评分:{item['score']} 突破于{p['break_date']} ({days_ago}天前)")
     
     print(f"\n[4/4] 生成图片...")
-    output_svg = os.path.expanduser('~/double_bottom_charts_20260510')
-    os.makedirs(output_svg, exist_ok=True)
-    
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    output_dir = os.path.join(script_dir, f'{END_DATE}_data')
+    os.makedirs(output_dir, exist_ok=True)
+
     for i, item in enumerate(top5):
-        svg_path = os.path.join(output_svg, f'top{i+1}_{item["code"]}.svg')
+        svg_path = os.path.join(output_dir, f'top{i+1}_{item["code"]}.svg')
         draw_svg_chart(item['df'], item['pattern'], item['score'], item['reasons'], item['name'], item['code'], svg_path)
         print(f"  SVG: {svg_path}")
-    
-    # 转 PNG
-    output_png = os.path.expanduser('~/storage/shared/termux/20260510双底')
-    os.makedirs(output_png, exist_ok=True)
-    for f in os.listdir(output_svg):
-        if f.endswith('.svg'):
-            os.system(f'magick "{os.path.join(output_svg, f)}" "{os.path.join(output_png, f.replace(".svg", ".png"))}" 2>&1')
-    
-    print(f"\n完成! PNG保存在: {output_png}")
+
+    print(f"\n完成! 图表保存在: {output_dir}")
     print("=" * 50)
     
     for i, item in enumerate(top5):

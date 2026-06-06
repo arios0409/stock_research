@@ -15,7 +15,7 @@ import math
 import statistics
 
 # ============ 配置 ============
-TUSHARE_TOKEN='026586...ad60'
+TUSHARE_TOKEN = '0265861c3dee65908f646a7c9e01f759ebda32a742b1728f92a7ad60'
 API_URL = 'http://api.tushare.pro'
 END_DATE = '20260517'
 START_DATE = '20241001'
@@ -386,7 +386,8 @@ def main():
         print(f"  {i+1}. {item['name']} ({item['code']}) 评分:{item['score']} 突破于{p['break_date']} ({days_ago}天前)")
 
     print(f"\n[4/4] 生成图片...")
-    output_dir = os.path.expanduser('~/triple_bottom_charts')
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    output_dir = os.path.join(script_dir, f'{END_DATE}_data')
     os.makedirs(output_dir, exist_ok=True)
 
     for i, item in enumerate(top5):
