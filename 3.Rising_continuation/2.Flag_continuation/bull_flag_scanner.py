@@ -406,12 +406,11 @@ def main():
     output_dir = os.path.join(script_dir, f'{END_DATE}_data')
     os.makedirs(output_dir, exist_ok=True)
 
-    # 计算最早允许的突破日期 (END_DATE - SCAN_WINDOW_MONTHS个月)
+    # 计算最早允许的突破日期 (END_DATE - SCAN_WINDOW_MONTHS×30天)
+    from datetime import timedelta
     end_dt = datetime.strptime(END_DATE, '%Y%m%d')
-    earliest_month = end_dt.month - SCAN_WINDOW_MONTHS
-    earliest_year = end_dt.year + (earliest_month - 1) // 12
-    earliest_month = (earliest_month - 1) % 12 + 1
-    earliest_date = f'{earliest_year}{earliest_month:02d}01'
+    earliest_dt = end_dt - timedelta(days=SCAN_WINDOW_MONTHS * 30)
+    earliest_date = earliest_dt.strftime('%Y%m%d')
 
     print("=" * 60)
     print("  上升旗形(Bull Flag)中继形态扫描器")
