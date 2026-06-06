@@ -115,6 +115,86 @@ SUB_TO_L1 = {
     # 家用电器
     '家用电器': '家用电器',
 }
+# ============ 申万子行业→散户常见概念别名 ============
+# 用于和东方财富/同花顺概念板块对齐
+IND_TO_CONCEPT = {
+    # 农林牧渔
+    '种植业': '农业种植', '渔业': '水产养殖', '林业': '林业',
+    '饲料': '饲料', '农业综合': '农业',
+    # 食品饮料
+    '食品': '食品饮料/预制菜', '乳制品': '乳业', '白酒': '白酒',
+    '啤酒': '啤酒', '红黄酒': '酿酒', '软饮料': '饮料',
+    # 纺织服饰
+    '纺织': '纺织服装', '服饰': '服装家纺',
+    # 轻工制造
+    '造纸': '造纸', '家居用品': '家居/智能家居', '文教休闲': '文教/盲盒',
+    '广告包装': '包装印刷', '纺织机械': '纺织机械', '轻工机械': '智能制造/工业母机',
+    # 医药生物
+    '医疗保健': '医疗器械', '化学制药': '化学制药', '生物制药': '创新药/生物医药',
+    '中成药': '中药', '医药商业': '医药商业',
+    # 公用事业
+    '火力发电': '火电', '水力发电': '水电/绿电', '新型电力': '新能源电力',
+    '水务': '水务', '供气供热': '燃气/供热', '环境保护': '环保',
+    # 交通运输
+    '公路': '高速公路', '路桥': '基建', '公共交通': '公共交通',
+    '铁路': '铁路', '空运': '航空运输', '机场': '机场',
+    '港口': '港口', '水运': '航运', '仓储物流': '物流',
+    # 房地产
+    '区域地产': '房地产', '全国地产': '房地产', '园区开发': '园区/REITs',
+    '房产服务': '房地产服务',
+    # 商贸零售
+    '百货': '商业百货', '商贸代理': '贸易', '其他商业': '零售',
+    '超市连锁': '超市/新零售', '批发业': '批发', '商品城': '商业',
+    '电器连锁': '家电零售',
+    # 社会服务
+    '旅游景点': '旅游', '旅游服务': '旅游', '酒店餐饮': '酒店餐饮',
+    # 综合
+    '综合类': '综合',
+    # 建筑材料
+    '水泥': '水泥建材', '玻璃': '玻璃玻纤/光伏玻璃', '陶瓷': '陶瓷',
+    '其他建材': '建材',
+    # 建筑装饰
+    '建筑工程': '建筑工程', '装修装饰': '装修装饰',
+    # 电力设备
+    '电气设备': '电力设备/电网', '电器仪表': '仪器仪表',
+    # 国防军工
+    '航空': '航天航空/军工', '船舶': '船舶/军工', '运输设备': '轨交设备',
+    '化工机械': '化工设备', '农用机械': '农机',
+    # 计算机
+    '软件服务': '国产软件/信创', 'IT设备': '信创/计算机设备', '互联网': '互联网/数字经济',
+    # 传媒
+    '影视音像': '影视/传媒', '出版业': '出版/传媒',
+    # 通信
+    '通信设备': '5G/通信', '电信运营': '电信/算力',
+    # 银行
+    '银行': '银行',
+    # 非银金融
+    '证券': '券商', '保险': '保险', '多元金融': '多元金融',
+    # 汽车
+    '汽车整车': '汽车整车/新能源车', '汽车配件': '汽车零部件', '汽车服务': '汽车服务',
+    '摩托车': '摩托车',
+    # 机械设备
+    '专用机械': '专用设备/高端装备', '机械基件': '机械/通用设备', '机床制造': '工业母机/高端装备',
+    '工程机械': '工程机械',
+    # 有色金属
+    '铜': '铜', '铝': '铝', '铅锌': '铅锌',
+    '黄金': '黄金', '小金属': '小金属/稀土', '矿物制品': '非金属材料',
+    # 煤炭
+    '煤炭开采': '煤炭', '焦炭加工': '焦炭/煤化工',
+    # 石油石化
+    '石油开采': '石油', '石油加工': '炼化/石化', '石油贸易': '油服',
+    # 钢铁
+    '普钢': '钢铁', '钢加工': '钢铁加工', '特种钢': '特钢',
+    # 基础化工
+    '化工原料': '化工', '塑料': '塑料', '橡胶': '橡胶',
+    '农药化肥': '农化/化肥', '染料涂料': '染料/涂料', '化纤': '化纤',
+    '日用化工': '日化',
+    # 电子
+    '元器件': '电子元件/消费电子', '半导体': '芯片/半导体',
+    # 家用电器
+    '家用电器': '家电',
+}
+
 # 未覆盖到的子行业归为"其他"
 SUB_TO_L1_DEFAULT = '其他'
 
@@ -772,92 +852,104 @@ def score_hot_sectors(industry_stats, multi_period_rets, vol_ratios,
     return scored
 
 
-# ============ 延续性评估 ============
+# ============ 延续性评估（新版：趋势结构 + 资金共振） ============
 
 def assess_continuity(scored, multi_period_rets, industry_stats, market_trend=None):
     """
-    基于多周期数据的延续性评估
-    等级: 加速热点 > 持续热点 > 新兴热点 > 关注中 > 待观察
+    四象限趋势结构 + 资金共振评估
 
-    market_trend: {'regime': 'up'|'sideways'|'down', 'ret_5d': float, 'ret_20d': float}
-      用于在下跌市中降低评分置信度
+    趋势结构:
+      加速型 🔥: 当日 > 5日 > 20日, 全部为正 → 次日延续概率最高
+      稳定型 ✅: 全部为正, 非加速, 宽度 > 60% → 稳健但爆发力弱
+      反转型 ⚡: 当日涨但20日深跌 (< -5%) → V型反弹, 高风险
+      减速型 ⚠️: 20日好但5日转负 → 趋势减弱, 警惕
+      弱势型 ❌: 多周期全跌
+
+    资金共振: 量比 > 1.2 且 主力净流入 > 0 → 真金白银
+
+    market_trend: {'regime': 'up'|'sideways'|'down', ...}
     """
-    top10_names = {s['name'] for s in scored[:10]}
     continuity = {}
 
-    for s in scored[:20]:
+    for s in scored[:30]:
         ind = s['name']
-        st = industry_stats[ind]
+        st = industry_stats.get(ind, {})
         ret_5d = multi_period_rets.get(ind, {}).get('ret_5d', 0)
         ret_20d = multi_period_rets.get(ind, {}).get('ret_20d', 0)
 
         daily = s['daily_ret']
-        breadth = st['up_ratio']
-        lu = s['limit_up']
+        breadth = st.get('up_ratio', 0)
+        vol_ratio = s.get('vol_ratio', 1.0)
+        net_mf = s.get('net_mf_rate', 0)
 
-        # 趋势判断: 20日 vs 5日 vs 当日
-        # 加速: 当日 > 5日 > 20日 (越来越强)
-        # 持续: 5日 > 0且当日 > 0
-        # 新兴: 当日突然爆发但过去一般
-        # 退潮: 5日/20日不错但当日走弱
+        # ---- 趋势结构 ----
+        all_positive = daily > 0 and ret_5d > 0 and ret_20d > 0
 
-        # 赚钱效应: 近期5天的平均涨幅 vs 再前5天
-        ret_trend = 'stable'
-        if ret_5d > 0 and daily > 0 and ret_20d > 0:
-            if daily > ret_5d > 0:
-                ret_trend = 'accelerating'
-            else:
-                ret_trend = 'sustained'
-        elif daily > 0 and ret_20d <= 0:
-            ret_trend = 'emerging'
-        elif daily < 0 and (ret_5d > 0 or ret_20d > 0):
-            ret_trend = 'fading'
-        elif daily < 0:
-            ret_trend = 'weak'
-
-        # 热度持续性评级
-        if s['score'] >= 75 and breadth >= 60 and ret_trend in ('accelerating', 'sustained'):
-            if ret_trend == 'accelerating':
-                status = '加速热点'
-            else:
-                status = '持续热点'
-        elif s['score'] >= 65 and breadth >= 50:
-            status = '新兴热点'
-        elif s['score'] >= 50:
-            status = '关注中'
+        if all_positive and daily > ret_5d and ret_5d > ret_20d:
+            structure = 'accelerating'
+            structure_label = '加速型🔥'
+        elif all_positive and breadth >= 60:
+            structure = 'stable'
+            structure_label = '稳定型✅'
+        elif daily > 0 and ret_20d < -5:
+            structure = 'reversal'
+            structure_label = '反转型⚡'
+        elif ret_20d > 3 and ret_5d < -1:
+            structure = 'decelerating'
+            structure_label = '减速型⚠️'
+        elif daily > 0 and ret_5d > 0:
+            structure = 'emerging'
+            structure_label = '新兴🌟'
+        elif daily < 0 and ret_5d < 0:
+            structure = 'weak'
+            structure_label = '弱势❌'
         else:
-            status = '待观察'
+            structure = 'mixed'
+            structure_label = '分化'
 
-        # 特殊情况修正
-        if lu >= 5 and s['score'] >= 60:
-            # 涨停潮 → 至少算热点
-            if status in ('待观察', '关注中'):
-                status = '新兴热点'
+        # ---- 资金共振 ----
+        money_resonance = vol_ratio >= 1.2 and net_mf > 0
+
+        # ---- 明日延续概率 ----
+        # 量化打分: 趋势结构(0-60) + 资金(0-25) + 宽度(0-15)
+        structure_score = {
+            'accelerating': 55, 'stable': 45, 'emerging': 35,
+            'reversal': 20, 'decelerating': 15, 'mixed': 10, 'weak': 5
+        }.get(structure, 20)
+
+        money_score = 25 if (money_resonance and net_mf > 5) else (
+            15 if money_resonance else (10 if net_mf > 0 else 0))
+
+        breadth_score = 15 if breadth >= 80 else (10 if breadth >= 60 else 5)
+
+        continuation_score = structure_score + money_score + breadth_score
+
+        if continuation_score >= 70:
+            continuation_level = '高'
+        elif continuation_score >= 45:
+            continuation_level = '中'
+        else:
+            continuation_level = '低'
+
+        # ---- 市场趋势修正 ----
+        if market_trend and market_trend.get('regime') == 'down':
+            if structure in ('accelerating', 'reversal'):
+                structure_label = structure_label.replace('🔥','') + '(逆势)'
+                continuation_score = max(continuation_score - 20, 0)
+                continuation_level = '中' if continuation_level == '高' else '低'
+        elif market_trend and market_trend.get('regime') == 'up':
+            if structure in ('accelerating', 'stable', 'emerging'):
+                continuation_score = min(continuation_score + 10, 100)
+                if continuation_score >= 70:
+                    continuation_level = '高'
 
         continuity[ind] = {
-            'status': status,
-            'trend': ret_trend,
+            'structure': structure,
+            'structure_label': structure_label,
+            'money_resonance': money_resonance,
+            'continuation_level': continuation_level,
+            'continuation_score': continuation_score,
         }
-
-        # ---- 市场趋势修正: 下跌市中反转风险 ----
-        if market_trend and market_trend.get('regime') == 'down':
-            # 下跌市中, 高评分板块有反转风险
-            if s['score'] >= 75:
-                continuity[ind]['status'] = f'{status}(反转风险)'
-                continuity[ind]['reversal_risk'] = True
-            elif s['score'] >= 60:
-                # 中等评分也降一级
-                if status == '新兴热点':
-                    continuity[ind]['status'] = '关注中(承压)'
-                elif status == '关注中':
-                    continuity[ind]['status'] = '待观察(承压)'
-                continuity[ind]['reversal_risk'] = True
-        elif market_trend and market_trend.get('regime') == 'up':
-            # 上升趋势中, 新兴热点可提升一级
-            if status == '新兴热点' and s['score'] >= 70:
-                continuity[ind]['status'] = '持续热点(顺势)'
-            elif status == '加速热点':
-                continuity[ind]['status'] = '加速热点(顺势)'
 
     return continuity
 
@@ -883,7 +975,7 @@ def print_header(title):
 
 
 def render_results(scored, continuity, trade_date, hs300_ret, show_all=False,
-                    market_trend=None):
+                    market_trend=None, concept_mode=False):
     """渲染终端输出"""
     reset = c('reset')
 
@@ -917,7 +1009,7 @@ def render_results(scored, continuity, trade_date, hs300_ret, show_all=False,
     # ---- 热门板块 Top 15 ----
     display_n = len(scored) if show_all else min(15, len(scored))
     print(f'  {"排":>3} {"行业":<8} {"得分":>5} {"涨幅%":>6} {"超额":>6} '
-          f'{"RPS5":>4} {"RPS20":>4} {"量比":>4} {"净流":>6} {"涨停":>4} {"宽度%":>5} {"热力":<10}')
+          f'{"RPS5":>4} {"RPS20":>4} {"量比":>4} {"净流":>6} {"涨停":>4} {"宽度%":>5} {"趋势结构 & 延续":<18}')
     print(f'  {"-"*80}')
 
     for rank, s in enumerate(scored[:display_n], 1):
@@ -930,14 +1022,29 @@ def render_results(scored, continuity, trade_date, hs300_ret, show_all=False,
             c('green') if rank <= 10 else ''))
         lu_str = f'{s["limit_up"]}' if s['limit_up'] > 0 else ''
 
-        # 终端输出（ANSI颜色会增加显示长度，用空格补偿）
+        # 概念别名
+        if concept_mode:
+            concept_name = IND_TO_CONCEPT.get(ind, ind)
+            display_name = f'{ind}/{concept_name}'
+            name_width = 20
+        else:
+            display_name = ind
+            name_width = 8
+
+        # 延续性新字段
+        structure_label = con.get('structure_label', '')
+        cont_level = con.get('continuation_level', '')
+        money_tag = '💰' if con.get('money_resonance') else ''
+        cont_str = f'{structure_label} {cont_level}{money_tag}'
+
+        # 终端输出
         mf_str = f'{s["net_mf_rate"]:>+5.1f}' if 'net_mf_rate' in s else ''
-        print(f'{color}  {rank:>2} {ind:<8} {s["score"]:>4.0f} '
+        print(f'{color}  {rank:>2} {display_name:<{name_width}} {s["score"]:>4.0f} '
               f'{s["daily_ret"]:>+5.2f} {s["excess_ret"]:>+5.2f} '
               f'{s["rps_5d"]:>3.0f} {s["rps_20d"]:>3.0f} '
               f'{s["vol_ratio"]:>3.1f} {mf_str:>6} '
               f'{lu_str:>4} '
-              f'{s["breadth"]:>4.0f} {status:<10}{reset}')
+              f'{s["breadth"]:>4.0f} {cont_str:<18}{reset}')
 
     print(f'  {"-"*80}')
     print(f'  🔴 前3  🟡 4-5  🟢 6-10\n')
@@ -947,11 +1054,10 @@ def render_results(scored, continuity, trade_date, hs300_ret, show_all=False,
     for rank, s in enumerate(scored[:5], 1):
         ind = s['name']
         con = continuity.get(ind, {})
-        trend_symbol = {'accelerating': '📈↑',
-                        'sustained': '➡→',
-                        'emerging': '🌟新',
-                        'fading': '📉↓',
-                        'weak': '⬇弱'}.get(con.get('trend', ''), '➡→')
+        structure_label = con.get('structure_label', '')
+        cont_level = con.get('continuation_level', '')
+        money_tag = ' 💰资金共振' if con.get('money_resonance') else ''
+        cont_score = con.get('continuation_score', 0)
 
         print(f'\n  #{rank} {ind}')
         print(f'     综合 {s["score"]:.0f}分  |  当日 {s["daily_ret"]:+.2f}% '
@@ -960,6 +1066,7 @@ def render_results(scored, continuity, trade_date, hs300_ret, show_all=False,
               f'量比={s["vol_ratio"]:.1f}x  主力净流={s["net_mf_rate"]:+.1f}%')
         print(f'     涨停 {s["limit_up"]}家  |  宽度 {s["breadth"]:.0f}% '
               f'({s["stock_count"]}只)')
+        print(f'     📐 趋势结构: {structure_label}{money_tag}  |  延续概率: {cont_level} ({cont_score}分/100)')
         # 贡献分解
         contribs = [
             ('RPS5', s['c_rps5'], s['c_rps5'] >= 10),
@@ -977,20 +1084,25 @@ def render_results(scored, continuity, trade_date, hs300_ret, show_all=False,
         neg_str = '  '.join(neg) if neg else '—'
         print(f'     ✅拉升: {pos_str}')
         print(f'     ❌拖累: {neg_str}')
-        print(f'     5日涨幅 {s["ret_5d"]:+.2f}%  20日涨幅 {s["ret_20d"]:+.2f}%  '
-              f'趋势 {trend_symbol} {con.get("status", "")}')
+        print(f'     5日涨幅 {s["ret_5d"]:+.2f}%  20日涨幅 {s["ret_20d"]:+.2f}%')
     print()
 
     # ---- 延续性概览 ----
-    print_header('延续性分布')
-    levels = [('加速热点', 4), ('持续热点', 3), ('新兴热点', 2),
-              ('关注中', 1), ('待观察', 0)]
-    for status, _ in levels:
-        matching = [(s['name'], s['score'])
-                    for s in scored if continuity.get(s['name'], {}).get('status') == status]
+    print_header('明日延续性评估')
+    print(f'  {"趋势结构 & 延续概率":<36} {"板块":<50}')
+    print(f'  {"-"*86}')
+    structures_order = ['accelerating', 'stable', 'emerging', 'reversal', 'decelerating', 'mixed', 'weak']
+    for struct in structures_order:
+        matching = [(s['name'], s['score'], continuity.get(s['name'], {}))
+                    for s in scored
+                    if continuity.get(s['name'], {}).get('structure') == struct]
         if matching:
-            names = '  '.join(f'{n}({sc:.0f})' for n, sc in matching[:8])
-            print(f'  [{status}]: {names}')
+            struct_label = matching[0][2].get('structure_label', struct)
+            for name, score, con in matching[:10]:
+                cont_level = con.get('continuation_level', '')
+                money_tag = ' 💰' if con.get('money_resonance') else ''
+                cont_score = con.get('continuation_score', 0)
+                print(f'  {struct_label:<12} 延续{cont_level}({cont_score}分){money_tag:<4}  {name}({score:.0f})')
     print()
 
     # ---- 完整排行 ----
@@ -998,7 +1110,7 @@ def render_results(scored, continuity, trade_date, hs300_ret, show_all=False,
         print_header(f'全部 {len(scored)} 个行业排行')
         print(f'  {"排":>3} {"行业":<8} {"得分":>4} {"涨幅%":>6} '
               f'{"RPS5":>4} {"RPS20":>4} {"量比":>4} {"涨停":>4} {"宽度%":>4} '
-              f'{"5日%":>6} {"20日%":>6} {"状态":<8}')
+              f'{"5日%":>6} {"20日%":>6} {"趋势 & 延续":<16}')
         print(f'  {"-"*76}')
         for rank, s in enumerate(scored, 1):
             ind = s['name']
@@ -1006,11 +1118,14 @@ def render_results(scored, continuity, trade_date, hs300_ret, show_all=False,
             lu_str = f'{s["limit_up"]}' if s['limit_up'] > 0 else ''
             ret_5 = f'{s["ret_5d"]:+.2f}' if s['ret_5d'] != 0 else ' 0.00'
             ret_20 = f'{s["ret_20d"]:+.2f}' if s['ret_20d'] != 0 else ' 0.00'
+            structure_lbl = con.get('structure_label', '')
+            cont_lev = con.get('continuation_level', '')
+            full_cont_str = f'{structure_lbl} {cont_lev}'
             print(f'  {rank:>2}  {ind:<8} {s["score"]:>3.0f} '
                   f'{s["daily_ret"]:>+5.2f} {s["rps_5d"]:>3.0f} '
                   f'{s["rps_20d"]:>3.0f} {s["vol_ratio"]:>3.1f} '
                   f'{lu_str:>4} {s["breadth"]:>3.0f} '
-                  f'{ret_5:>6} {ret_20:>6} {con.get("status",""):<8}')
+                  f'{ret_5:>6} {ret_20:>6} {full_cont_str:<16}')
         print()
 
     # ---- 总结 ----
@@ -1030,7 +1145,7 @@ def save_csv(scored, continuity, trade_date):
     os.makedirs(outdir, exist_ok=True)
     path = os.path.join(outdir, f'hot_sectors_{trade_date}.csv')
 
-    header = '排名,行业,综合得分,当日涨幅%,超额收益%,RPS_5D,RPS_20D,量比,主力净流入%,涨停数,板块宽度%,5日涨幅%,20日涨幅%,热度状态,个股数'
+    header = '排名,行业,综合得分,当日涨幅%,超额收益%,RPS_5D,RPS_20D,量比,主力净流入%,涨停数,板块宽度%,5日涨幅%,20日涨幅%,趋势结构,延续概率,资金共振,个股数'
     lines = [header]
     for i, s in enumerate(scored, 1):
         c = continuity.get(s['name'], {})
@@ -1039,7 +1154,8 @@ def save_csv(scored, continuity, trade_date):
             f'{s["rps_5d"]:.1f},{s["rps_20d"]:.1f},{s["vol_ratio"]:.2f},'
             f'{s["net_mf_rate"]:.1f},{s["limit_up"]},'
             f'{s["breadth"]:.1f},{s["ret_5d"]:.2f},{s["ret_20d"]:.2f},'
-            f'{c.get("status","")},{s["stock_count"]}'
+            f'{c.get("structure_label","")},{c.get("continuation_level","")},'
+            f'{1 if c.get("money_resonance") else 0},{s["stock_count"]}'
         )
 
     with open(path, 'w', encoding='utf-8-sig') as f:
@@ -1056,6 +1172,7 @@ def main():
     show_all = False
     save_csv_flag = False
     l1_mode = False
+    concept_mode = False
     target_date_input = None
 
     for arg in sys.argv[1:]:
@@ -1067,11 +1184,13 @@ def main():
             save_csv_flag = True
         elif arg == '--l1':
             l1_mode = True
+        elif arg == '--concept':
+            concept_mode = True
         elif len(arg) == 8 and arg.isdigit():
             target_date_input = arg
         elif arg.startswith('--'):
             print(f'未知参数: {arg}')
-            print('用法: python3 hot_sectors_scanner.py [YYYYMMDD] [--quick] [--all] [--csv] [--l1]')
+            print('用法: python3 hot_sectors_scanner.py [YYYYMMDD] [--quick] [--all] [--csv] [--l1] [--concept]')
             return
 
     # ---- 步骤1: 确定交易日 ----
@@ -1189,7 +1308,7 @@ def main():
     # ---- 步骤10: 输出 ----
     print('\n========== 输出结果 ==========\n')
     render_results(scored, continuity, trade_date, hs300_ret, show_all,
-                   market_trend)
+                   market_trend, concept_mode)
 
     # CSV
     if save_csv_flag:

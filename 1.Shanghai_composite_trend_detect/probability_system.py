@@ -8,7 +8,7 @@ import numpy as np
 TOKEN = "0265861c3dee65908f646a7c9e01f759ebda32a742b1728f92a7ad60"
 pro = ts.pro_api(TOKEN)
 
-df = pro.index_daily(ts_code="000001.SH", start_date="20240801", end_date="20260526")
+df = pro.index_daily(ts_code="000001.SH", start_date="20240801", end_date="20260601")
 df = df.sort_values("trade_date").reset_index(drop=True)
 df["date"] = pd.to_datetime(df["trade_date"])
 

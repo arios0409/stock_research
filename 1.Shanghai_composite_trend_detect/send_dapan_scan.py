@@ -50,7 +50,7 @@ def send_text(content):
     return post({'msgtype': 'text', 'text': {'content': content}})
 
 # ===== 发送图表 =====
-chart_path = '/mnt/e/Hermes_workspace/stock_research/1.大盘趋势判断/图3_三子图_高对比.png'
+chart_path = '/mnt/e/Hermes_workspace/stock_research/1.Shanghai_composite_trend_detect/图3_三子图_高对比.png'
 print('上传大盘趋势图...')
 media_id = upload_file(chart_path)
 if media_id:
