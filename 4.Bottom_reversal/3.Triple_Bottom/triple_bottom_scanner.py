@@ -13,14 +13,16 @@ import os
 import time
 import math
 import statistics
+from datetime import datetime
 
 # ============ 配置 ============
 TUSHARE_TOKEN = '0265861c3dee65908f646a7c9e01f759ebda32a742b1728f92a7ad60'
 API_URL = 'http://api.tushare.pro'
-END_DATE = '20260517'
+END_DATE = '20260415'           # 扫描截止日期（形态必须在此之前突破）
 START_DATE = '20241001'
 PATTERN_START = '20251201'
 MAX_SCAN = 400
+PLOT_END_DATE = datetime.now().strftime('%Y%m%d')  # 画图数据拉到当前日期
 
 # ============ Tushare API 封装 ============
 
@@ -47,7 +49,8 @@ def get_hs300_components():
     if not result or 'items' not in result: return None
     return list(set(item[0] for item in result['items']))
 
-def get_daily_data(ts_code, start_date=START_DATE, end_date=END_DATE):
+def get_daily_data(ts_code, start_date=START_DATE, end_date=None):
+    if end_date is None: end_date = PLOT_END_DATE
     result = api_call('daily', ts_code=ts_code, start_date=start_date, end_date=end_date)
     if not result or 'fields' not in result or 'items' not in result: return None
     fields = result['fields']
@@ -360,29 +363,33 @@ def main():
         if idx % 30 == 0 and idx > 0: print(f"  进度: {idx}/{len(scan_codes)}")
 
         try:
-            df = get_daily_data(code)
-            if not df or len(df) < 80: continue
+            plot_df = get_daily_data(code)  # 拉到当前日期，用于画图
+            if not plot_df or len(plot_df) < 80: continue
 
-            patterns = detect_triple_bottom(df, window=10)
+            # 截取到END_DATE用于形态检测
+            scan_df = [d for d in plot_df if d['trade_date'] <= END_DATE]
+            if len(scan_df) < 60: continue
+
+            patterns = detect_triple_bottom(scan_df, window=10)
             name = stock_map.get(code, code)
 
             for p in patterns:
-                score, reasons = score_triple_bottom(df, p)
+                score, reasons = score_triple_bottom(scan_df, p)
                 if score >= 40:
                     all_patterns.append({
-                        'code': code, 'name': name, 'df': df,
+                        'code': code, 'name': name, 'plot_df': plot_df, 'scan_df': scan_df,
                         'pattern': p, 'score': score, 'reasons': reasons
                     })
             time.sleep(0.12)
         except: continue
 
-    all_patterns.sort(key=lambda x: (len(x['df'])-1-x['pattern']['break_idx'], -x['score']))
+    all_patterns.sort(key=lambda x: (len(x['scan_df'])-1-x['pattern']['break_idx'], -x['score']))
     top5 = all_patterns[:5]
 
     print(f"\n[3/4] 前5名:")
     for i, item in enumerate(top5):
         p = item['pattern']
-        days_ago = len(item['df']) - 1 - p['break_idx']
+        days_ago = len(item['scan_df']) - 1 - p['break_idx']
         print(f"  {i+1}. {item['name']} ({item['code']}) 评分:{item['score']} 突破于{p['break_date']} ({days_ago}天前)")
 
     print(f"\n[4/4] 生成图片...")
@@ -392,7 +399,7 @@ def main():
 
     for i, item in enumerate(top5):
         svg_path = os.path.join(output_dir, f'top{i+1}_{item["code"]}.svg')
-        draw_svg_chart(item['df'], item['pattern'], item['score'], item['reasons'], item['name'], item['code'], svg_path)
+        draw_svg_chart(item['plot_df'], item['pattern'], item['score'], item['reasons'], item['name'], item['code'], svg_path)
         print(f"  SVG: {svg_path}")
 
     # 导出CSV (全部符合条件的结果)
@@ -401,7 +408,7 @@ def main():
         f.write('rank,code,name,score,break_date,b1_date,b1_price,b2_date,b2_price,b3_date,b3_price,resistance,current_price,dist_pct,target,space_pct,reasons\n')
         for i, item in enumerate(all_patterns):
             p = item['pattern']
-            cp = float(item['df'][-1]['close'])
+            cp = float(item['plot_df'][-1]['close'])
             dist = (cp - p['resistance_price']) / p['resistance_price'] * 100
             min_b = min(p['b1_price'], p['b2_price'], p['b3_price'])
             target = p['resistance_price'] + (p['resistance_price'] - min_b)
@@ -411,7 +418,7 @@ def main():
     print(f"  CSV: {csv_path}")
     for i, item in enumerate(top5):
         p = item['pattern']
-        cp = float(item['df'][-1]['close'])
+        cp = float(item['plot_df'][-1]['close'])
         dist = (cp - p['resistance_price']) / p['resistance_price'] * 100
         min_b = min(p['b1_price'], p['b2_price'], p['b3_price'])
         target = p['resistance_price'] + (p['resistance_price'] - min_b)
