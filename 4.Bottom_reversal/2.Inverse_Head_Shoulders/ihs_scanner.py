@@ -415,7 +415,22 @@ def main():
         draw_svg_chart(item['df'], item['pattern'], item['score'], item['reasons'], item['name'], item['code'], svg_path)
         print(f"  SVG: {svg_path}")
 
-    print(f"\n{'='*50}")
+    # 导出CSV (全部符合条件的结果)
+    csv_path = os.path.join(output_dir, f'results_{END_DATE}.csv')
+    with open(csv_path, 'w') as f:
+        f.write('rank,code,name,score,break_date,ls_date,ls_price,h_date,h_price,rs_date,rs_price,neck_current,current_price,dist_pct,target,space_pct,reasons\n')
+        for i, item in enumerate(all_patterns):
+            p = item['pattern']
+            cp = float(item['df'][-1]['close'])
+            n_slope = p['neck_slope']
+            neck_now = p['neck2_price'] + n_slope * (len(item['df'])-1-p['neck2_idx'])
+            dist = (cp - neck_now) / neck_now * 100
+            head_to_neck = p['neck2_price'] - p['h_price']
+            target = neck_now + head_to_neck
+            space = (target - cp) / cp * 100
+            reasons_str = '; '.join(item['reasons'])
+            f.write(f'{i+1},{item["code"]},{item["name"]},{item["score"]},{p["break_date"]},{p["ls_date"]},{p["ls_price"]:.2f},{p["h_date"]},{p["h_price"]:.2f},{p["rs_date"]},{p["rs_price"]:.2f},{neck_now:.2f},{cp:.2f},{dist:.1f},{target:.2f},{space:.1f},{reasons_str}\n')
+    print(f"  CSV: {csv_path}")
     for i, item in enumerate(top5):
         p = item['pattern']
         cp = float(item['df'][-1]['close'])

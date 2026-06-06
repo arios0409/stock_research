@@ -374,6 +374,21 @@ def main():
         draw_svg_chart(item['df'], item['pattern'], item['score'], item['reasons'], item['name'], item['code'], svg_path)
         print(f"  SVG: {svg_path}")
 
+    # 导出CSV (全部符合条件的结果)
+    csv_path = os.path.join(output_dir, f'results_{END_DATE}.csv')
+    with open(csv_path, 'w') as f:
+        f.write('rank,code,name,score,break_date,left_date,left_price,right_date,right_price,neck_price,current_price,dist_pct,target,space_pct,reasons\n')
+        for i, item in enumerate(all_patterns):
+            p = item['pattern']
+            cp = float(item['df'][-1]['close'])
+            dist = (cp - p['neck_price']) / p['neck_price'] * 100
+            min_b = min(p['left_price'], p['right_price'])
+            target = p['neck_price'] + (p['neck_price'] - min_b)
+            space = (target - cp) / cp * 100
+            reasons_str = '; '.join(item['reasons'])
+            f.write(f'{i+1},{item["code"]},{item["name"]},{item["score"]},{p["break_date"]},{p["left_date"]},{p["left_price"]:.2f},{p["right_date"]},{p["right_price"]:.2f},{p["neck_price"]:.2f},{cp:.2f},{dist:.1f},{target:.2f},{space:.1f},{reasons_str}\n')
+    print(f"  CSV: {csv_path}")
+
     print(f"\n完成! 图表保存在: {output_dir}")
     print("=" * 50)
     
