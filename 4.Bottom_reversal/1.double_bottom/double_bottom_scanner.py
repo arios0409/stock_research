@@ -18,7 +18,7 @@ from datetime import datetime
 # ============ 配置 ============
 TUSHARE_TOKEN = '0265861c3dee65908f646a7c9e01f759ebda32a742b1728f92a7ad60'
 API_URL = 'http://api.tushare.pro'
-END_DATE = '20260415'
+END_DATE = '20260510'
 START_DATE = '20241001'  # 往前多取一些数据用于计算指标
 DOUBLE_BOTTOM_START = '20251201'  # 双底形态开始时间
 MAX_SCAN = 400  # 扫描数量限制
@@ -85,6 +85,14 @@ def calc_rsi(closes, period=14):
         rsi[i] = 100.0 if avg_loss == 0 else 100 - 100 / (1 + avg_gain / avg_loss)
     return rsi
 
+def moving_avg(data, period):
+    """简单移动平均"""
+    n = len(data)
+    result = [None] * n
+    for i in range(period - 1, n):
+        result[i] = sum(data[i - period + 1: i + 1]) / period
+    return result
+
 # ============ 双底检测 ============
 
 def detect_double_bottom(df, window=8):
@@ -96,6 +104,7 @@ def detect_double_bottom(df, window=8):
     dates = [d['trade_date'] for d in df]
     macd = calc_macd(closes)
     rsi = calc_rsi(closes)
+    vol_ma20 = moving_avg(volumes, 20)
     
     # 找局部高低点
     lows, highs = [], []
@@ -124,19 +133,36 @@ def detect_double_bottom(df, window=8):
         necks = [h for h in highs if l1_idx < h[0] < l2_idx]
         if not necks: continue
         n_idx, n_price = max(necks, key=lambda x: x[1])
-        if n_price / min(l1_price, l2_price) < 1.05: continue
+        
+        # === 优化: 颈线高度 ≥ 10% (原5%，太低容易是假突破) ===
+        neck_height_pct = (n_price - min(l1_price, l2_price)) / min(l1_price, l2_price)
+        if neck_height_pct < 0.10: continue
         
         # 双底必须在指定时间范围内开始形成
         if dates[l1_idx] < DOUBLE_BOTTOM_START: continue
         
-        # 检查突破颈线的时间
+        # 检查有效突破（放量 + 不回踩）
         break_idx = None
         for j in range(l2_idx, n):
-            if closes[j] > n_price * 1.01:  # 突破1%算有效突破
+            if closes[j] > n_price * 1.01:  # 突破1%以上
+                # === 优化: 突破日放量确认 (vol > MA20 × 1.5) ===
+                if vol_ma20[j] is not None and volumes[j] < vol_ma20[j] * 1.5:
+                    continue
+                # === 优化: 突破后3天内不回踩颈线×0.98 ===
+                fake_breakout = False
+                for k in range(j + 1, min(j + 4, n)):
+                    if closes[k] < n_price * 0.98:
+                        fake_breakout = True
+                        break
+                if fake_breakout:
+                    continue
+                # 通过所有过滤
                 break_idx = j
                 break
         
-        if break_idx is None: continue  # 未突破
+        if break_idx is None: continue  # 未有效突破
+        
+        break_vol_ratio = volumes[break_idx] / vol_ma20[break_idx] if vol_ma20[break_idx] and vol_ma20[break_idx] > 0 else 1
         
         results.append({
             'left_idx': l1_idx, 'left_price': l1_price, 'left_date': dates[l1_idx], 'left_vol': l1_vol,
@@ -145,29 +171,31 @@ def detect_double_bottom(df, window=8):
             'break_idx': break_idx, 'break_date': dates[break_idx],
             'gap': gap,
             'price_diff_pct': abs(l1_price - l2_price) / min(l1_price, l2_price),
-            'height_pct': (n_price - min(l1_price, l2_price)) / min(l1_price, l2_price),
+            'height_pct': neck_height_pct,
             'left_macd': macd[l1_idx], 'right_macd': macd[l2_idx],
             'left_rsi': rsi[l1_idx], 'right_rsi': rsi[l2_idx],
+            'break_vol': volumes[break_idx],
+            'break_vol_ma20': vol_ma20[break_idx],
+            'break_vol_ratio': break_vol_ratio,
             'closes': closes, 'volumes': volumes, 'dates': dates
         })
     
     return results
 
 def score_pattern(df, pattern):
-    """评分 (0-100)，侧重突破新鲜度和拉升潜力"""
+    """评分 (0-100)，侧重突破质量而非新鲜度"""
     score = 0
     reasons = []
     current_price = float(df[-1]['close'])
     n = len(df)
-    end_date = df[-1]['trade_date']
     
     # === 核心过滤 ===
     neck_price = pattern['neck_price']
     if current_price <= neck_price: return -1, []  # 未突破
     
-    # 突破幅度不能超过5%
+    # 突破幅度不能超过8%（放宽，放量确认后可容忍更远）
     dist = (current_price - neck_price) / neck_price
-    if dist > 0.05: return -1, []
+    if dist > 0.08: return -1, []
     
     # 计算目标位及剩余空间
     min_bottom = min(pattern['left_price'], pattern['right_price'])
@@ -177,48 +205,62 @@ def score_pattern(df, pattern):
     
     # === 评分项 ===
     
-    # 1. 突破新鲜度 (最高权重 25分) - 距离5月10日越近越好
+    # 1. 突破质量 — 放量确认 (最高权重 20分)
+    bvr = pattern.get('break_vol_ratio', 1)
+    if bvr >= 2.5:
+        score += 20; reasons.append(f'突破巨量({bvr:.1f}x均量)')
+    elif bvr >= 2.0:
+        score += 16; reasons.append(f'突破显著放量({bvr:.1f}x均量)')
+    elif bvr >= 1.5:
+        score += 10; reasons.append(f'突破放量({bvr:.1f}x均量)')
+    
+    # 2. 突破新鲜度 (15分，降权：质量 > 新鲜)
     break_idx = pattern['break_idx']
     days_since_break = n - 1 - break_idx
     if days_since_break <= 3:
-        score += 25; reasons.append(f'刚刚突破({days_since_break}天前)')
+        score += 15; reasons.append(f'刚刚突破({days_since_break}天前)')
     elif days_since_break <= 5:
-        score += 20; reasons.append(f'突破仅{days_since_break}天')
+        score += 12; reasons.append(f'突破仅{days_since_break}天')
     elif days_since_break <= 10:
-        score += 15; reasons.append(f'突破{days_since_break}天')
+        score += 8; reasons.append(f'突破{days_since_break}天')
     else:
-        score += 5; reasons.append(f'突破已{days_since_break}天(较久)')
+        score += 3; reasons.append(f'突破已{days_since_break}天(较久)')
     
-    # 2. 右底缩量 (20分)
+    # 3. 右底缩量 (15分)
     if pattern['left_vol'] > 0:
         vol_ratio = pattern['right_vol'] / pattern['left_vol']
-        if vol_ratio < 0.3: score += 20; reasons.append(f'右底极度缩量({vol_ratio:.0%})')
-        elif vol_ratio < 0.5: score += 18; reasons.append(f'右底显著缩量({vol_ratio:.0%})')
-        elif vol_ratio < 0.7: score += 12; reasons.append(f'右底缩量({vol_ratio:.0%})')
+        if vol_ratio < 0.3: score += 15; reasons.append(f'右底极度缩量({vol_ratio:.0%})')
+        elif vol_ratio < 0.5: score += 12; reasons.append(f'右底显著缩量({vol_ratio:.0%})')
+        elif vol_ratio < 0.7: score += 8; reasons.append(f'右底缩量({vol_ratio:.0%})')
     
-    # 3. 形态跨度 (15分)
+    # 4. 形态跨度 (10分)
     gap = pattern['gap']
-    if gap >= 30: score += 15; reasons.append(f'形态跨度大({gap}根K线)')
-    elif gap >= 20: score += 10; reasons.append(f'形态跨度适中({gap}根K线)')
+    if gap >= 30: score += 10; reasons.append(f'形态跨度大({gap}根K线)')
+    elif gap >= 20: score += 7; reasons.append(f'形态跨度适中({gap}根K线)')
     
-    # 4. MACD底背离 (15分)
+    # 5. 颈线高度 (10分) — 越高越可靠
+    h = pattern['height_pct']
+    if h >= 0.15: score += 10; reasons.append(f'颈线高度优({h:.1%})')
+    elif h >= 0.12: score += 7; reasons.append(f'颈线高度好({h:.1%})')
+    elif h >= 0.10: score += 4; reasons.append(f'颈线高度合格({h:.1%})')
+    
+    # 6. MACD底背离 (10分)
     if pattern['right_macd'] > pattern['left_macd'] and pattern['left_price'] >= pattern['right_price']:
-        score += 15; reasons.append('MACD底背离')
+        score += 10; reasons.append('MACD底背离')
     elif pattern['right_macd'] > pattern['left_macd']:
-        score += 10; reasons.append('MACD改善')
+        score += 6; reasons.append('MACD改善')
     
-    # 5. 右底高于左底 (10分)
+    # 7. 右底高于左底 (10分)
     if pattern['right_price'] > pattern['left_price']:
         score += 10; reasons.append('右底高于左底(抬高低点)')
     elif abs(pattern['right_price'] - pattern['left_price']) / pattern['left_price'] < 0.01:
         score += 8; reasons.append('两底齐平(强支撑)')
     
-    # 6. 振幅合理 (10分)
-    h = pattern['height_pct']
-    if 0.10 <= h <= 0.25: score += 10; reasons.append(f'振幅理想({h:.1%})')
-    elif 0.08 <= h < 0.10: score += 7; reasons.append(f'振幅合理({h:.1%})')
+    # 8. 振幅合理 (5分)
+    if 0.12 <= h <= 0.30: score += 5; reasons.append(f'振幅理想({h:.1%})')
+    elif 0.10 <= h < 0.12: score += 3; reasons.append(f'振幅合理({h:.1%})')
     
-    # 7. RSI底背离 (5分)
+    # 9. RSI底背离 (5分)
     if pattern['right_rsi'] > pattern['left_rsi'] and pattern['left_price'] >= pattern['right_price']:
         score += 5; reasons.append('RSI底背离')
     
@@ -381,11 +423,12 @@ def main():
         draw_svg_chart(item['plot_df'], item['pattern'], item['score'], item['reasons'], item['name'], item['code'], svg_path)
         print(f"  SVG: {svg_path}")
 
-    # 导出CSV (全部符合条件的结果)
+    # 导出CSV (前20名)
     csv_path = os.path.join(output_dir, f'results_{END_DATE}.csv')
+    top20 = all_patterns[:20]
     with open(csv_path, 'w') as f:
-        f.write('rank,code,name,score,break_date,left_date,left_price,right_date,right_price,neck_price,current_price,dist_pct,target,space_pct,reasons\n')
-        for i, item in enumerate(all_patterns):
+        f.write('rank,code,name,score,break_date,left_date,left_price,right_date,right_price,neck_price,current_price,dist_pct,target,space_pct,break_vol_ratio,reasons\n')
+        for i, item in enumerate(top20):
             p = item['pattern']
             cp = float(item['plot_df'][-1]['close'])
             dist = (cp - p['neck_price']) / p['neck_price'] * 100
@@ -393,8 +436,9 @@ def main():
             target = p['neck_price'] + (p['neck_price'] - min_b)
             space = (target - cp) / cp * 100
             reasons_str = '; '.join(item['reasons'])
-            f.write(f'{i+1},{item["code"]},{item["name"]},{item["score"]},{p["break_date"]},{p["left_date"]},{p["left_price"]:.2f},{p["right_date"]},{p["right_price"]:.2f},{p["neck_price"]:.2f},{cp:.2f},{dist:.1f},{target:.2f},{space:.1f},{reasons_str}\n')
-    print(f"  CSV: {csv_path}")
+            bvr = p.get('break_vol_ratio', 0)
+            f.write(f'{i+1},{item["code"]},{item["name"]},{item["score"]},{p["break_date"]},{p["left_date"]},{p["left_price"]:.2f},{p["right_date"]},{p["right_price"]:.2f},{p["neck_price"]:.2f},{cp:.2f},{dist:.1f},{target:.2f},{space:.1f},{bvr:.1f},{reasons_str}\n')
+    print(f"  CSV: {csv_path} ({len(top20)}条)")
 
     print(f"\n完成! 图表保存在: {output_dir}")
     print("=" * 50)
