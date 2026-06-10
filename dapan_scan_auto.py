@@ -76,12 +76,78 @@ for i in range(N - 1, len(close)):
         k[i] = (rsv * 1 + k[i - 1] * (M1 - 1)) / M1
         d[i] = (k[i] * 1 + d[i - 1] * (M2 - 1)) / M2
 
-# ===== 3. 概率系统 =====
+# ===== 3. V3 概率系统 (KDJ + 成交量 + MACD + 智能确认) =====
+# 3a. MACD 计算
+def ema(data, span):
+    result = np.full(len(data), np.nan, dtype=float)
+    k_ema = 2.0 / (span + 1)
+    result[0] = data[0]
+    for i in range(1, len(data)):
+        result[i] = data[i] * k_ema + result[i-1] * (1 - k_ema)
+    return result
+
+ema12 = ema(close, 12)
+ema26 = ema(close, 26)
+dif = ema12 - ema26
+dea = ema(dif, 9)
+macd_hist = 2 * (dif - dea)
+
+macd_bullish = np.zeros(len(close), dtype=bool)
+macd_bearish = np.zeros(len(close), dtype=bool)
+for i in range(1, len(close)):
+    if not np.isnan(dif[i]) and not np.isnan(dif[i-1]):
+        macd_bullish[i] = (dif[i-1] <= dea[i-1]) and (dif[i] > dea[i])
+        macd_bearish[i] = (dif[i-1] >= dea[i-1]) and (dif[i] < dea[i])
+
+macd_trend = np.zeros(len(close), dtype=float)
+for i in range(len(close)):
+    if not np.isnan(dif[i]) and not np.isnan(dea[i]):
+        if dif[i] > dea[i] and (i == 0 or dif[i] > dif[i-1]):
+            macd_trend[i] = 1.0
+        elif dif[i] > dea[i]:
+            macd_trend[i] = 0.5
+        elif dif[i] < dea[i] and (i == 0 or dif[i] < dif[i-1]):
+            macd_trend[i] = -1.0
+        else:
+            macd_trend[i] = -0.5
+
+# 3b. 成交量特征
+vol_ma20 = np.full(len(close), np.nan, dtype=float)
+for i in range(19, len(close)):
+    vol_ma20[i] = np.mean(vol[i - 19:i + 1])
+
+vol_ma5 = np.full(len(close), np.nan, dtype=float)
+for i in range(4, len(close)):
+    vol_ma5[i] = np.mean(vol[i - 4:i + 1])
+
+vol_ratio = np.full(len(close), 1.0)
+for i in range(len(close)):
+    if not np.isnan(vol_ma20[i]) and vol_ma20[i] > 0:
+        vol_ratio[i] = vol[i] / vol_ma20[i]
+
+vol_divergence = np.zeros(len(close), dtype=float)
+for i in range(20, len(close)):
+    price_high_20 = np.max(close[i - 19:i])
+    if close[i] >= price_high_20 * 0.995:
+        recent_vol_max = np.max(vol[i - 19:i])
+        if recent_vol_max > 0 and vol[i] < recent_vol_max * 0.65:
+            vol_divergence[i] = 1.0  # 顶背离
+    price_low_20 = np.min(close[i - 19:i])
+    if close[i] <= price_low_20 * 1.005:
+        recent_vol_avg = np.mean(vol[i - 19:i])
+        if recent_vol_avg > 0 and vol[i] < recent_vol_avg * 0.6:
+            vol_divergence[i] = -1.0  # 底背离
+
+vol_trend = np.full(len(close), 0.0)
+for i in range(len(close)):
+    if not np.isnan(vol_ma5[i]) and not np.isnan(vol_ma20[i]) and vol_ma20[i] > 0:
+        vol_trend[i] = (vol_ma5[i] / vol_ma20[i]) - 1.0
+
+# 3c. V3 概率计算
 p_up = np.full(len(close), 50.0)
 p_down = np.full(len(close), 50.0)
 p_risk = np.full(len(close), 50.0)
 up_days = down_days = risk_days = 0
-transitions = []
 
 for i in range(N, len(close)):
     prev_up = p_up[i-1]; prev_down = p_down[i-1]; prev_risk = p_risk[i-1]
@@ -95,46 +161,175 @@ for i in range(N, len(close)):
     down_days = down_days+1 if in_down_zone else 0
     risk_days = risk_days+1 if (k[i] < d[i] and k[i] >= 85) else 0
 
+    # 成交量修正
+    vr = vol_ratio[i]
+    vt = vol_trend[i]
+    vd = vol_divergence[i]
+    mt = macd_trend[i]
+    mb = macd_bullish[i]
+    ms = macd_bearish[i]
+
+    vol_boost_up = 0.0
+    vol_boost_down = 0.0
+    vol_penalty_up = 0.0
+    vol_penalty_risk = 0.0
+
+    if vr > 1.3:
+        if k[i] > d[i]:
+            vol_boost_up = min((vr - 1.0) * 12, 18)
+        else:
+            vol_boost_down = min((vr - 1.0) * 10, 15)
+    elif vr < 0.5:
+        if k[i] > d[i]:
+            vol_penalty_up = -10
+
+    if vd > 0:
+        vol_penalty_risk = 18
+        vol_penalty_up -= 8
+    elif vd < 0:
+        vol_boost_up += 12
+
+    if vt > 0.15 and k[i] > d[i]:
+        vol_boost_up += min(vt * 8, 8)
+    elif vt < -0.25 and k[i] > d[i]:
+        vol_penalty_up -= 5
+
+    # MACD共振
+    macd_boost_up = 0.0
+    macd_boost_down = 0.0
+    macd_boost_risk = 0.0
+
+    if is_golden and mb:
+        macd_boost_up = 10
+    elif is_golden and mt > 0:
+        macd_boost_up = 5
+    elif is_death and ms:
+        macd_boost_down = 10
+    elif is_death and mt < 0:
+        macd_boost_down = 5
+
+    if mt > 0.5:
+        macd_boost_up += 3
+    elif mt < -0.5:
+        macd_boost_down += 3
+        if k[i] >= 70:
+            macd_boost_risk += 5
+
+    # P_UP
     if k[i] > d[i]:
-        p_up_val = 80 if low_golden_bonus else (60 if is_golden else min(60+up_days*5, 92))
+        if low_golden_bonus:
+            base = 80 + vol_boost_up + macd_boost_up
+        elif is_golden:
+            base = 60 + vol_boost_up + macd_boost_up
+        else:
+            base = min(60 + up_days * 5 + vol_boost_up * 0.5 + macd_boost_up * 0.5, 92)
+        p_up_val = max(base + vol_penalty_up, 10)
     else:
-        p_up_val = 30 if is_death else max(prev_up-(down_days*8 if down_days>0 else 3), 10)
+        if is_death:
+            p_up_val = 30
+        else:
+            p_up_val = max(prev_up - (down_days * 8 if down_days > 0 else 3), 10)
 
-    if in_down_zone: p_down_val = min(55+down_days*5, 88)
-    elif k[i] < d[i] and k[i] < 50: p_down_val = min(45+(50-k[i])*1.5, 80)
-    elif high_death: p_down_val = 50
-    elif risk_days >= 1: p_down_val = min(50+risk_days*3, 70)
-    elif is_golden: p_down_val = max(prev_down-15, 10)
-    else: p_down_val = max(prev_down-2, 20)
+    # P_DOWN
+    if in_down_zone:
+        p_down_val = min(55 + down_days * 5 + vol_boost_down + macd_boost_down, 88)
+    elif k[i] < d[i] and k[i] < 50:
+        p_down_val = min(45 + (50 - k[i]) * 1.5 + vol_boost_down * 0.5 + macd_boost_down * 0.5, 80)
+    elif high_death:
+        p_down_val = 50 + vol_boost_down * 0.5 + macd_boost_down * 0.5
+    elif risk_days >= 1:
+        p_down_val = min(50 + risk_days * 3 + macd_boost_down * 0.3, 70)
+    elif is_golden:
+        p_down_val = max(prev_down - 15, 10)
+    else:
+        decay = 2 if vr >= 0.8 else 1.5
+        p_down_val = max(prev_down - decay, 20)
 
-    if high_death: p_risk_val = 65
-    elif risk_days >= 1 and k[i] < d[i]: p_risk_val = min(65+risk_days*5, 88)
-    elif k[i] < d[i] and k[i] >= 75: p_risk_val = min(45+(k[i]-75)*2, 65)
-    elif in_down_zone: p_risk_val = max(prev_risk-10, 10)
-    elif is_golden: p_risk_val = max(prev_risk-20, 5)
-    else: p_risk_val = max(prev_risk-2, 15)
+    # P_RISK
+    if high_death:
+        p_risk_val = 65 + vol_penalty_risk * 0.3 + macd_boost_risk
+    elif risk_days >= 1 and k[i] < d[i]:
+        p_risk_val = min(65 + risk_days * 5 + vol_penalty_risk * 0.5 + macd_boost_risk, 88)
+    elif k[i] < d[i] and k[i] >= 75:
+        p_risk_val = min(45 + (k[i] - 75) * 2 + vol_penalty_risk * 0.3 + macd_boost_risk, 70)
+    elif in_down_zone:
+        p_risk_val = max(prev_risk - 10, 10)
+    elif is_golden:
+        p_risk_val = max(prev_risk - 20, 5)
+    else:
+        p_risk_val = max(prev_risk - 2 + vol_penalty_risk * 0.2, 15)
 
-    p_up[i]=p_up_val; p_down[i]=p_down_val; p_risk[i]=p_risk_val
+    p_up[i] = max(10, min(92, p_up_val))
+    p_down[i] = max(10, min(88, p_down_val))
+    p_risk[i] = max(5, min(88, p_risk_val))
 
-# 状态
+# 3d. 智能信号确认 + 状态判定
+HYSTERESIS = 3.0
 state = np.full(len(close), 0, dtype=int)
-prev_s = 0
+prev_confirmed = 0
+pending_s = 0
+pending_cnt = 0
+transitions = []
 signal_triggers = {"金叉", "高位死叉", "K<35&D<40"}
 
 for i in range(N, len(close)):
-    s = 1 if (p_up[i] > p_risk[i] and p_up[i] > p_down[i]) else \
-        2 if (p_risk[i] > p_up[i] and p_risk[i] > p_down[i]) else \
-        3 if (p_down[i] > p_up[i] and p_down[i] > p_risk[i]) else 0
+    pu = p_up[i]; pdw = p_down[i]; pr = p_risk[i]
 
-    if s != prev_s and prev_s > 0 and s > 0:
-        is_g = k[i-1] <= d[i-1] and k[i] > d[i] if not (np.isnan(k[i]) or np.isnan(d[i-1])) else False
-        is_hd = (k[i-1] >= d[i-1] and k[i] < d[i] and k[i] >= 85) if not np.isnan(k[i]) else False
-        is_dz = k[i] < 35 and d[i] < 40
-        trig = "金叉" if is_g else ("高位死叉" if is_hd else ("K<35&D<40" if is_dz else "概率切换"))
-        if trig in signal_triggers:
-            transitions.append((i, prev_s, s, trig))
-    state[i] = s
-    prev_s = s
+    # 原始信号
+    if pu > pr + HYSTERESIS and pu > pdw + HYSTERESIS:
+        raw_s = 1
+    elif pr > pu + HYSTERESIS and pr > pdw + HYSTERESIS:
+        raw_s = 2
+    elif pdw > pu + HYSTERESIS and pdw > pr + HYSTERESIS:
+        raw_s = 3
+    else:
+        raw_s = prev_confirmed
+
+    # 信号置信度
+    is_g = k[i-1] <= d[i-1] and k[i] > d[i] if i > 0 else False
+    is_hd = (k[i-1] >= d[i-1] and k[i] < d[i] and k[i] >= 85) if i > 0 else False
+    vr = vol_ratio[i]
+    vd = vol_divergence[i]
+
+    high_conf_bull = (is_g and vr > 1.3) or \
+                     (is_g and macd_bullish[i]) or \
+                     (vd < 0) or \
+                     (pu > 70 and vr > 1.2)
+
+    high_conf_bear = (is_hd and vr > 1.3) or \
+                     (is_hd and macd_bearish[i]) or \
+                     (vd > 0 and k[i] > 70)
+
+    # 确认天数
+    if raw_s == 1 and high_conf_bull:
+        confirm_days = 1
+    elif raw_s == 3 or raw_s == 2:
+        if high_conf_bear or is_hd:
+            confirm_days = 1
+        else:
+            confirm_days = 2
+    else:
+        confirm_days = 2
+
+    # 信号确认逻辑
+    if raw_s != pending_s:
+        pending_s = raw_s
+        pending_cnt = 1
+    else:
+        pending_cnt += 1
+
+    if pending_cnt >= confirm_days:
+        s = pending_s
+        # 记录转换事件（用于图表标注）
+        if s != prev_confirmed and prev_confirmed > 0 and s > 0:
+            is_dz = k[i] < 35 and d[i] < 40
+            trig = "金叉" if is_g else ("高位死叉" if is_hd else ("K<35&D<40" if is_dz else "概率切换"))
+            if trig in signal_triggers:
+                transitions.append((i, prev_confirmed, s, trig))
+        state[i] = s
+        prev_confirmed = s
+    else:
+        state[i] = prev_confirmed
 
 # ===== 4. 生成图表 =====
 log("生成趋势图表...")
@@ -303,7 +498,7 @@ elif cur_s == 2:  # 风险/震荡
 else:
     advice = "方向不明，观望为主"
 
-msg = f"""【上证指数 KDJ概率趋势系统】{last_data_date}
+msg = f"""【上证指数 KDJ概率趋势系统 V3】{last_data_date}
 当前状态: {cur_state}
 上升概率 {cur_pu:.0f}%  下跌概率 {cur_pd:.0f}%  震荡概率 {cur_pr:.0f}%
 建议: {advice}"""
