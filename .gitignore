@@ -15,3 +15,11 @@ reports/
 4.Bottom_reversal/1.double_bottom/20260517_data/
 4.Bottom_reversal/*/*_data/
 3.Rising_continuation/*/*_data/
+
+# 日志
+*.log
+logs/
+
+# 热点回测数据
+6.Hot_topic_backtest/data/
+6.Hot_topic_backtest/*.json
