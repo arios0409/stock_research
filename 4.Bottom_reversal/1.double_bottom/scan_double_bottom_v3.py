@@ -27,9 +27,11 @@ PLOT_START = '20240501'          # 画图数据起始（2年）
 DB_START = '20250625'  # 1年内 (2026-06-25 - 365天)            # 双底形态起始日期
 API_SLEEP = 0.12                 # API节流
 BATCH_SIZE = 500                 # 每批扫描数量
-TOP_K = 20                       # CSV保留数
-TOP_CHART = 5                    # 画图数
+TOP_K = 30                       # CSV保留数
+TOP_CHART = 10                    # 画图数
+BACKTEST_MODE = False             # 回测模式(不扣已达标分)
 MIN_SCORE = 40                   # 最低评分
+REVENUE_CACHE = {}               # 营收增长缓存
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'output', TODAY)
@@ -232,19 +234,21 @@ def detect_double_bottom(df, window=8):
     return results
 
 
-def score_pattern(df, pattern):
-    """评分系统：满分100"""
+def score_pattern(df, pattern, is_backtest=False, ts_code=''):
+    """评分系统 V5
+    is_backtest=True: 回测模式，不扣已达标分（需统计达成率）
+    is_backtest=False: 扫描模式，已达标-50（排除已完成目标股）"""
     score = 0
     reasons = []
     current_price = float(df[-1]['close'])
     n = len(df)
     neck_price = pattern['neck_price']
 
-    # 现价必须高于颈线，且不超过颈线5%（防止追高）
-    if current_price <= neck_price:
+    # 现价距颈线：低于颈线-5%拒收，高于颈线+6%拒收
+    if (neck_price - current_price) / neck_price > 0.05:
         return -1, []
     dist = (current_price - neck_price) / neck_price
-    if dist > 0.05:
+    if dist > 0.06:
         return -1, []
 
     # 目标空间 >= 8%
@@ -253,24 +257,42 @@ def score_pattern(df, pattern):
     space_to_target = (target - current_price) / current_price
     if space_to_target < 0.08:
         return -1, []
-
-    # 1. 突破新鲜度（25分）
+    
+    # ── 已达标/接近目标 → 扣分或拒收 ──
+    # 查突破后最高价是否已触及目标
     break_idx = pattern['break_idx']
-    days_since_break = n - 1 - break_idx
-    if days_since_break <= 3:
-        score += 25
-        reasons.append(f'刚刚突破({days_since_break}天前)')
-    elif days_since_break <= 5:
-        score += 20
-        reasons.append(f'突破仅{days_since_break}天')
-    elif days_since_break <= 10:
-        score += 15
-        reasons.append(f'突破{days_since_break}天')
-    else:
-        score += 5
-        reasons.append(f'突破已{days_since_break}天')
+    post_break_closes = [float(df[j]['close']) for j in range(break_idx, n)]
+    post_break_high = max(post_break_closes)
+    if post_break_high >= target:
+        if is_backtest:
+            pass  # 回测模式不扣分，需统计达成率
+        else:
+            score -= 50
+            reasons.append('⚠已触及目标位(-50)')
 
-    # 2. 右底缩量（20分）
+    # ── 1. 时间验证（动态±分）──
+    days_since_break = n - 1 - break_idx
+    
+    # 回落惩罚 — 重新低于颈线4%
+    if (neck_price - current_price) / neck_price > 0.04:
+        score -= 10
+        reasons.append(f'⚠重新低于颈线{((neck_price - current_price)/neck_price):.0%}(-10)')
+    
+    # 时间分 — 固定档位
+    if days_since_break <= 10:
+        score += 10
+        reasons.append(f'突破{days_since_break}天(+10)')
+    elif days_since_break <= 20:
+        score += 20
+        reasons.append(f'突破{days_since_break}天黄金窗口(+20)')
+    elif days_since_break <= 30:
+        score += 10
+        reasons.append(f'突破{days_since_break}天(+10)')
+    else:
+        score += 0
+        reasons.append(f'突破{days_since_break}天(+0)')
+
+    # ── 2. 右底缩量（20分）── 不变 ──
     if pattern['left_vol'] > 0:
         vol_ratio = pattern['right_vol'] / pattern['left_vol']
         if vol_ratio < 0.3:
@@ -283,16 +305,19 @@ def score_pattern(df, pattern):
             score += 12
             reasons.append(f'右底缩量({vol_ratio:.0%})')
 
-    # 3. 形态跨度（15分）
+    # ── 3. 形态跨度 —— >60:+20, 30-60:+10, <20:-10
     gap = pattern['gap']
-    if gap >= 30:
-        score += 15
-        reasons.append(f'形态跨度大({gap}根K线)')
-    elif gap >= 20:
+    if gap > 60:
+        score += 20
+        reasons.append(f'形态跨度长({gap}天,+20)')
+    elif 30 < gap <= 60:
         score += 10
-        reasons.append(f'形态跨度适中({gap}根K线)')
+        reasons.append(f'形态跨度中({gap}天,+10)')
+    elif gap < 20:
+        score -= 10
+        reasons.append(f'⚠形态跨度过短({gap}天,-10)')
 
-    # 4. MACD底背离（15分）
+    # ── 4. MACD底背离（15分）── 不变 ──
     if pattern['right_macd'] > pattern['left_macd'] and pattern['left_price'] >= pattern['right_price']:
         score += 15
         reasons.append('MACD底背离')
@@ -300,15 +325,24 @@ def score_pattern(df, pattern):
         score += 10
         reasons.append('MACD改善')
 
-    # 5. 右底高于左底（10分）
-    if pattern['right_price'] > pattern['left_price']:
+    # ── 5. 双底关系 —— 齐平+20, 略低+10, 大低+5, 抬高0, 抬高>10%-10
+    rl_ratio = (pattern['right_price'] - pattern['left_price']) / pattern['left_price']
+    if rl_ratio > 0.10:                 # 右底抬高超过10% → -10
+        score -= 10
+        reasons.append(f'⚠右底抬高{rl_ratio:.0%}(-10)')
+    elif rl_ratio > 0.01:               # 右底抬高 1-10% → 不加分
+        reasons.append(f'右底抬高{rl_ratio:.0%}(+0)')
+    elif rl_ratio < -0.05:              # 右底大低 → +5
+        score += 5
+        reasons.append(f'右底大幅低于左底(+5)')
+    elif rl_ratio < -0.01:              # 右底略低 → +10
         score += 10
-        reasons.append('右底高于左底')
-    elif abs(pattern['right_price'] - pattern['left_price']) / pattern['left_price'] < 0.01:
-        score += 8
-        reasons.append('两底齐平')
+        reasons.append('右底低于左底(+10)')
+    else:                               # 两底齐平 → +20
+        score += 20
+        reasons.append('两底齐平(+20)')
 
-    # 6. 振幅合理（10分）
+    # ── 6. 振幅合理（10分）── 不变 ──
     h = pattern['height_pct']
     if 0.10 <= h <= 0.25:
         score += 10
@@ -317,10 +351,42 @@ def score_pattern(df, pattern):
         score += 7
         reasons.append(f'振幅合理({h:.1%})')
 
-    # 7. RSI底背离（5分）
+    # ── 7. RSI底背离（5分）── 不变 ──
     if pattern['right_rsi'] > pattern['left_rsi'] and pattern['left_price'] >= pattern['right_price']:
         score += 5
         reasons.append('RSI底背离')
+
+    # ── 9. 剩余空间奖励 —— >15%:+10, 10-15%:+5
+    if space_to_target > 0.15:
+        score += 10
+        reasons.append(f'目标空间优秀({space_to_target:.0%})')
+    elif 0.10 <= space_to_target <= 0.15:
+        score += 5
+        reasons.append(f'目标空间适中({space_to_target:.0%})')
+
+    # ── 10. 营收增长扣分 ──
+    if ts_code and ts_code not in REVENUE_CACHE:
+        try:
+            rdf = api_call('fina_indicator', ts_code=ts_code, period='20260331',
+                          fields='ts_code,or_yoy')
+            if rdf and 'items' in rdf and rdf['items']:
+                or_yoy = float(rdf['items'][0][rdf['fields'].index('or_yoy')]) if 'or_yoy' in rdf['fields'] else 0
+            else:
+                or_yoy = 0
+        except:
+            or_yoy = 0
+        REVENUE_CACHE[ts_code] = or_yoy
+    
+    or_yoy = REVENUE_CACHE.get(ts_code, 0)
+    if or_yoy < -30:
+        score -= 20
+        reasons.append(f'⚠营收增速{or_yoy:.0f}%(-20)')
+    elif or_yoy < -15:
+        score -= 10
+        reasons.append(f'⚠营收增速{or_yoy:.0f}%(-10)')
+    elif or_yoy < 0:
+        score -= 5
+        reasons.append(f'⚠营收增速{or_yoy:.0f}%(-5)')
 
     return score, reasons
 
@@ -376,6 +442,7 @@ def write_top20_csv(records, csv_path):
                             key=lambda x: (-x['score'], x['days_since_break']))
     top20 = sorted_records[:TOP_K]
 
+    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
     with open(csv_path, 'w', encoding='utf-8-sig') as f:
         f.write(','.join(CSV_COLS) + '\n')
         for i, r in enumerate(top20):
@@ -459,6 +526,7 @@ def draw_svg_chart(df, pattern, score, reasons, stock_name, stock_code, save_pat
     svg = []
     svg.append(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}">')
     svg.append(f'<rect width="{W}" height="{H}" fill="#0d1117"/>')
+    svg.append('<style>text{font-family:SimHei,Microsoft YaHei,sans-serif}</style>')
 
     # 标题
     svg.append(f'<text x="{W / 2}" y="24" text-anchor="middle" font-size="17" fill="#58a6ff" font-weight="bold">'
@@ -588,7 +656,7 @@ def scan_batch(codes, stock_map, industry_map, start_idx, total):
             industry = industry_map.get(code, '')
 
             for p in patterns:
-                score, reasons = score_pattern(df, p)
+                score, reasons = score_pattern(df, p, is_backtest=BACKTEST_MODE, ts_code=code)
                 if score >= MIN_SCORE:
                     cp = float(df[-1]['close'])
                     min_b = min(p['left_price'], p['right_price'])

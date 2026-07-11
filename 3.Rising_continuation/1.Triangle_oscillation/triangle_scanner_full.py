@@ -355,6 +355,7 @@ def draw_svg_chart(df, pattern, score, reasons, stock_name, stock_code, save_pat
     svg = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}">',
         f'<rect width="{W}" height="{H}" fill="#1a1a2e"/>',
+        '<style>text{font-family:SimHei,Microsoft YaHei,sans-serif}</style>',
         f'<text x="{W/2}" y="28" text-anchor="middle" font-size="16" fill="#e0e0e0" font-weight="bold">{stock_name} ({stock_code})  三角收敛上涨中继  评分:{score}/100</text>'
     ]
 
