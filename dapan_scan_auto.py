@@ -263,89 +263,56 @@ for i in range(N, len(close)):
     p_down[i] = max(10, min(88, p_down_val))
     p_risk[i] = max(5, min(88, p_risk_val))
 
-# 3d. 智能信号确认 + 状态判定
-HYSTERESIS = 3.0
-state = np.full(len(close), 0, dtype=int)
-prev_confirmed = 0
-pending_s = 0
-pending_cnt = 0
-transitions = []
-signal_triggers = {"金叉", "高位死叉", "K<35&D<40"}
-
+# 3d. 方向判定 V3 — Pu/Pdw直接对比，无缓冲 (Pu>Pdw=上升, Pdw>Pu=下跌)
+direction = np.full(len(close), 0, dtype=int)  # 1=UP, -1=DOWN
+crosses = []  # 概率交叉点
 for i in range(N, len(close)):
-    pu = p_up[i]; pdw = p_down[i]; pr = p_risk[i]
-
-    # 原始信号
-    if pu > pr + HYSTERESIS and pu > pdw + HYSTERESIS:
-        raw_s = 1
-    elif pr > pu + HYSTERESIS and pr > pdw + HYSTERESIS:
-        raw_s = 2
-    elif pdw > pu + HYSTERESIS and pdw > pr + HYSTERESIS:
-        raw_s = 3
+    if p_up[i] > p_down[i]:
+        direction[i] = 1
+        if p_up[i-1] <= p_down[i-1]:
+            crosses.append((i, 1, 'golden'))
     else:
-        raw_s = prev_confirmed
-
-    # 信号置信度
-    is_g = k[i-1] <= d[i-1] and k[i] > d[i] if i > 0 else False
-    is_hd = (k[i-1] >= d[i-1] and k[i] < d[i] and k[i] >= 85) if i > 0 else False
-    vr = vol_ratio[i]
-    vd = vol_divergence[i]
-
-    high_conf_bull = (is_g and vr > 1.3) or \
-                     (is_g and macd_bullish[i]) or \
-                     (vd < 0) or \
-                     (pu > 70 and vr > 1.2)
-
-    high_conf_bear = (is_hd and vr > 1.3) or \
-                     (is_hd and macd_bearish[i]) or \
-                     (vd > 0 and k[i] > 70)
-
-    # 确认天数
-    if raw_s == 1 and high_conf_bull:
-        confirm_days = 1
-    elif raw_s == 3 or raw_s == 2:
-        if high_conf_bear or is_hd:
-            confirm_days = 1
-        else:
-            confirm_days = 2
-    else:
-        confirm_days = 2
-
-    # 信号确认逻辑
-    if raw_s != pending_s:
-        pending_s = raw_s
-        pending_cnt = 1
-    else:
-        pending_cnt += 1
-
-    if pending_cnt >= confirm_days:
-        s = pending_s
-        # 记录转换事件（用于图表标注）
-        if s != prev_confirmed and prev_confirmed > 0 and s > 0:
-            is_dz = k[i] < 35 and d[i] < 40
-            trig = "金叉" if is_g else ("高位死叉" if is_hd else ("K<35&D<40" if is_dz else "概率切换"))
-            if trig in signal_triggers:
-                transitions.append((i, prev_confirmed, s, trig))
-        state[i] = s
-        prev_confirmed = s
-    else:
-        state[i] = prev_confirmed
+        direction[i] = -1
+        if p_up[i-1] >= p_down[i-1]:
+            crosses.append((i, -1, 'death'))
 
 # ===== 4. 生成图表 =====
 log("生成趋势图表...")
 
 c_bg = '#0d1117'; c_ax = '#161b22'
-c_up = '#00ff00'; c_risk = '#ffff00'; c_down = '#ff0000'
+c_up = '#00ff00'; c_down = '#ff0000'
 c_price = '#ffffff'; c_k = '#ff9900'; c_d = '#33ddff'; c_j = '#dd88ff'
 c_grid = '#333333'; c_label = '#dddddd'
-sn = {0:"—", 1:"↑上升", 2:"△风险", 3:"↓下降"}
-sc = {0:c_label, 1:c_up, 2:c_risk, 3:c_down}
 
 M4_DAYS = 80
 m4_start = max(N, len(close) - M4_DAYS)
-d4 = dates[m4_start:]; c4 = close[m4_start:]
-st4 = state[m4_start:]; pu4 = p_up[m4_start:]; pd4 = p_down[m4_start:]; pr4 = p_risk[m4_start:]
-t4 = [(idx, fs, ts, trig) for idx, fs, ts, trig in transitions if idx >= m4_start]
+
+def draw_direction_spans(ax, dates_arr, close_arr, dir_arr):
+    ax.plot(dates_arr, close_arr, color=c_price, linewidth=1.6, alpha=0.95)
+    i = 0
+    while i < len(close_arr):
+        if dir_arr[i] == 0: i += 1; continue
+        s = dir_arr[i]; j = i
+        while j < len(close_arr) and dir_arr[j] == s: j += 1
+        for idx in range(i, j):
+            alpha = 0.15 if s == 1 else 0.12
+            if idx < len(close_arr) - 1:
+                ax.axvspan(dates_arr[idx], dates_arr[idx+1], alpha=alpha, color=c_up if s==1 else c_down, linewidth=0, zorder=0)
+        mid = i + (j - i) // 2
+        if mid < len(close_arr):
+            label = "↑上升" if s == 1 else "↓下跌"
+            clr = c_up if s == 1 else c_down
+            ymax = np.max(close_arr)
+            # 最后一个段加大标注
+            if j >= len(close_arr) - 5:
+                ax.text(dates_arr[mid], ymax + (ymax-np.min(close_arr))*0.05, label, color=clr, fontsize=14,
+                        fontweight='bold', ha='center', va='bottom',
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor=c_bg, edgecolor=clr, alpha=0.95, linewidth=2))
+            else:
+                ax.text(dates_arr[mid], ymax + (ymax-np.min(close_arr))*0.02, label, color=clr, fontsize=9,
+                        fontweight='bold', ha='center', va='bottom',
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor=c_bg, edgecolor=clr, alpha=0.85))
+        i = j
 
 fig = plt.figure(figsize=(20, 14), facecolor=c_bg)
 ax1 = fig.add_axes([0.07, 0.58, 0.90, 0.42], facecolor=c_ax)
@@ -355,46 +322,11 @@ ax4 = fig.add_axes([0.07, 0.02, 0.90, 0.18], facecolor=c_ax)
 
 DATE_FMT = lambda: mdates.DateFormatter('Y%yM%m')
 
-def draw_state_spans(ax, dates_arr, close_arr, state_arr, p_up_arr, p_down_arr, p_risk_arr,
-                     show_label=True, y_label_top=0):
-    ax.plot(dates_arr, close_arr, color=c_price, linewidth=1.6, alpha=0.95)
-    i = 0
-    while i < len(close_arr):
-        if state_arr[i] == 0: i += 1; continue
-        s = state_arr[i]; j = i
-        while j < len(close_arr) and state_arr[j] == s: j += 1
-        for idx in range(i, j):
-            if s == 1:
-                p_val = p_up_arr[idx]
-                alpha = 0.10 + (p_val - 55) / 37 * 0.38 if p_val > 55 else 0.06
-            elif s == 2:
-                p_val = p_risk_arr[idx]
-                alpha = 0.10 + (p_val - 50) / 38 * 0.38 if p_val > 50 else 0.06
-            elif s == 3:
-                p_val = p_down_arr[idx]
-                alpha = 0.10 + (p_val - 50) / 38 * 0.38 if p_val > 50 else 0.06
-            alpha = max(0.06, min(0.55, alpha))
-            if idx < len(close_arr) - 1:
-                ax.axvspan(dates_arr[idx], dates_arr[idx+1], alpha=alpha, color=sc[s], linewidth=0, zorder=0)
-
-        if show_label and y_label_top:
-            avg_p = np.mean(p_up_arr[i:j] if s == 1 else (p_risk_arr[i:j] if s == 2 else p_down_arr[i:j]))
-            mid = i + (j - i) // 2
-            if mid < len(close_arr):
-                ax.text(dates_arr[mid], y_label_top, f"{sn[s]} {avg_p:.0f}%", color=sc[s], fontsize=9,
-                        fontweight='bold', ha='center', va='top',
-                        bbox=dict(boxstyle='round,pad=0.2', facecolor=c_bg, edgecolor=sc[s], alpha=0.85))
-        i = j
-
 # 子图1: 上证全量
 y1_min, y1_max = np.min(close), np.max(close)
 y1_range = y1_max - y1_min
-ax1_top = y1_max + y1_range * 0.065
-ax1_lim = y1_max + y1_range * 0.15
-ax1_bot = y1_min - y1_range * 0.10
-draw_state_spans(ax1, dates, close, state, p_up, p_down, p_risk,
-                 show_label=True, y_label_top=ax1_top)
-ax1.set_ylim(ax1_bot, ax1_lim)
+draw_direction_spans(ax1, dates, close, direction)
+ax1.set_ylim(y1_min - y1_range * 0.10, y1_max + y1_range * 0.10)
 ax1.set_ylabel('上证指数', color=c_label, fontsize=20)
 ax1.tick_params(colors=c_label, labelsize=14)
 ax1.yaxis.set_minor_locator(MultipleLocator(100))
@@ -407,31 +339,17 @@ ax1.set_xticklabels([])
 ax2.plot(dates, k, color=c_k, linewidth=1.5, alpha=0.9)
 ax2.plot(dates, d, color=c_d, linewidth=1.5, alpha=0.9)
 ax2.plot(dates, 3*k-2*d, color=c_j, linewidth=0.8, alpha=0.5)
-ax2.axhline(y=85, color=c_risk, linestyle='--', alpha=0.4, linewidth=1.0)
+ax2.axhline(y=85, color=c_down, linestyle='--', alpha=0.4, linewidth=1.0)
 ax2.axhline(y=35, color=c_down, linestyle='--', alpha=0.4, linewidth=1.0)
 ax2.text(dates[-1], 86, '超买85', color='#ffee00', fontsize=8, alpha=0.6)
 ax2.text(dates[-1], 33, '危险35', color=c_down, fontsize=8, alpha=0.6)
 
-for idx, fs, ts, trig in transitions:
+for idx, dr, evt in crosses:
     y_k = k[idx]
-    if trig == "金叉":
-        ax2.scatter(dates[idx], y_k, color=c_up, s=60, marker='^', zorder=6, edgecolors='white', linewidth=0.8)
-        ax2.annotate('金叉', xy=(dates[idx], y_k), xytext=(dates[idx], y_k + 20),
-                    fontsize=8, color=c_up, fontweight='bold', ha='center',
-                    arrowprops=dict(arrowstyle='->', color=c_up, lw=1.5),
-                    bbox=dict(boxstyle='round,pad=0.15', facecolor=c_bg, edgecolor=c_up, alpha=0.9))
-    elif trig == "高位死叉":
-        ax2.scatter(dates[idx], y_k, color=c_risk, s=60, marker='v', zorder=6, edgecolors='white', linewidth=0.8)
-        ax2.annotate('高位死叉', xy=(dates[idx], y_k), xytext=(dates[idx], y_k - 22),
-                    fontsize=8, color=c_risk, fontweight='bold', ha='center', va='top',
-                    arrowprops=dict(arrowstyle='->', color=c_risk, lw=1.5),
-                    bbox=dict(boxstyle='round,pad=0.15', facecolor=c_bg, edgecolor=c_risk, alpha=0.9))
-    elif trig == "K<35&D<40":
-        ax2.scatter(dates[idx], y_k, color=c_down, s=60, marker='s', zorder=6, edgecolors='white', linewidth=0.8)
-        ax2.annotate('K<35&D<40', xy=(dates[idx], y_k), xytext=(dates[idx], y_k - 22),
-                    fontsize=8, color=c_down, fontweight='bold', ha='center', va='top',
-                    arrowprops=dict(arrowstyle='->', color=c_down, lw=1.5),
-                    bbox=dict(boxstyle='round,pad=0.15', facecolor=c_bg, edgecolor=c_down, alpha=0.9))
+    if evt == 'golden':
+        ax2.scatter(dates[idx], y_k, color=c_up, s=50, marker='^', zorder=6, edgecolors='white', linewidth=0.5)
+    elif evt == 'death':
+        ax2.scatter(dates[idx], y_k, color=c_down, s=50, marker='v', zorder=6, edgecolors='white', linewidth=0.5)
 
 ax2.set_ylabel('KDJ', color=c_label, fontsize=16)
 ax2.tick_params(colors=c_label, labelsize=12)
@@ -461,8 +379,8 @@ for ax in [ax1, ax2]:
     ax.tick_params(which='minor', colors=c_label, length=3)
 
 # 子图4: 近4月放大
-draw_state_spans(ax4, d4, c4, st4, pu4, pd4, pr4,
-                 show_label=True, y_label_top=np.max(c4) + (np.max(c4)-np.min(c4)) * 0.06)
+d4 = dates[m4_start:]; c4 = close[m4_start:]; dir4 = direction[m4_start:]
+draw_direction_spans(ax4, d4, c4, dir4)
 y_min, y_max = np.min(c4), np.max(c4)
 y_rng = y_max - y_min
 ax4.set_ylim(y_min - y_rng * 0.10, y_max + y_rng * 0.10)
@@ -481,27 +399,21 @@ fig.savefig(chart_path, dpi=150, facecolor=c_bg)
 plt.close(fig)
 log(f"✅ 图表已保存: {chart_path}")
 
-# ===== 5. 构建分析文字 =====
 last_idx = len(close) - 1
 cur_k = k[last_idx]; cur_d = d[last_idx]
-cur_pu = p_up[last_idx]; cur_pd = p_down[last_idx]; cur_pr = p_risk[last_idx]
-cur_state = sn[state[last_idx]]
+cur_pu = p_up[last_idx]; cur_pd = p_down[last_idx]
+cur_dir = "↑上升" if direction[last_idx] == 1 else "↓下跌"
+gap = abs(cur_pu - cur_pd)
 
-# 生成建议文字
-cur_s = state[last_idx]
-if cur_s == 3:  # 下跌
-    advice = "下跌趋势明显，等待回升信号再入场" if cur_pd >= 50 else "下跌动能减弱，关注是否企稳"
-elif cur_s == 1:  # 上升
-    advice = f"上升趋势确认，上升概率{cur_pu:.0f}%，可考虑入场" if cur_pu >= 60 else "上升信号初现但强度不足，轻仓试探"
-elif cur_s == 2:  # 风险/震荡
-    advice = "高位风险积聚，建议减仓观望" if cur_k >= 80 else "震荡格局，方向不明，观望为主"
+if direction[last_idx] == 1:
+    advice = f"Pu({cur_pu:.0f}%) > Pdw({cur_pd:.0f}%) 差值{gap:.0f}%，上升趋势" if gap >= 10 else f"Pu略高于Pdw，上升信号偏弱({gap:.0f}%)，注意确认"
 else:
-    advice = "方向不明，观望为主"
+    advice = f"Pdw({cur_pd:.0f}%) > Pu({cur_pu:.0f}%) 差值{gap:.0f}%，下跌趋势，观望" if gap >= 10 else f"Pdw略高于Pu，下跌信号偏弱({gap:.0f}%)，关注反转"
 
-msg = f"""【上证指数 KDJ概率趋势系统 V3】{last_data_date}
-当前状态: {cur_state}
-上升概率 {cur_pu:.0f}%  下跌概率 {cur_pd:.0f}%  震荡概率 {cur_pr:.0f}%
-建议: {advice}"""
+msg = f"""【上证指数 KDJ概率系统 V3】{last_data_date}
+当前方向: {cur_dir}
+Pu(上升概率) {cur_pu:.0f}%  |  Pdw(下跌概率) {cur_pd:.0f}%
+{advice}"""
 
 # ===== 6. 发送到企业微信（多群） =====
 def post(webhook_key, payload):

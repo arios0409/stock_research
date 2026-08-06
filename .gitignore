@@ -16,6 +16,9 @@ reports/
 4.Bottom_reversal/*/*_data/
 3.Rising_continuation/*/*_data/
 
+# 扫描输出
+output/
+
 # 日志
 *.log
 logs/

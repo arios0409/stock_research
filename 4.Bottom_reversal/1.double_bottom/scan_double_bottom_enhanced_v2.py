@@ -360,6 +360,7 @@ def draw_svg_chart(df, pattern, score, reasons, stock_name, stock_code, save_pat
     svg = []
     svg.append(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}">')
     svg.append(f'<rect width="{W}" height="{H}" fill="#0d1117"/>')
+    svg.append('<style>text{font-family:SimHei,Microsoft YaHei,sans-serif}</style>')
 
     # 标题
     svg.append(f'<text x="{W/2}" y="24" text-anchor="middle" font-size="17" fill="#58a6ff" font-weight="bold">'

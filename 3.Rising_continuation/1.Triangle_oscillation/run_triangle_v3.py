@@ -23,8 +23,8 @@ OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'output', TODAY)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 BATCH_SIZE = 500
-TOP_K = 20
-TOP_CHART = 5
+TOP_K = 30
+TOP_CHART = 20
 MIN_SCORE = 40  # 三角收敛评分阈值
 
 CSV_COLS = ['排名','代码','名称','行业','评分','三角开始','三角结束',
@@ -139,11 +139,15 @@ for bn in range(nb):
 et = time.time()-t0
 print(f"\n  完成! {et/60:.1f}分钟, {total}命中", flush=True)
 
+# Sleep to avoid tushare rate limit before drawing
+print("  等待3秒避免API限流...", flush=True)
+time.sleep(3)
+
 final = read_csv(csv_path)
 if not final:
     print("  无结果", flush=True); sys.exit(0)
 
-print(f"\n[3/3] top5 SVG...", flush=True)
+print(f"\n[3/3] TOP{TOP_CHART} SVG...", flush=True)
 for i, item in enumerate(final[:TOP_CHART]):
     code = item['code']
     print(f"  [{i+1}] {code} ({item['score']:.0f}分)", flush=True)
