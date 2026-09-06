@@ -58,6 +58,29 @@ low = df["low"].values
 opens = df["open"].values
 vol = df["vol"].values
 dates = pd.to_datetime(df["trade_date"]).values
+
+# ===== 1b. 轮动数据 (10日IC, 从缓存读) =====
+rotation_ic = None
+rotation_dates = None
+_cache_path = os.path.join(BASE_DIR, '7.Index_contribution', 'output', 'sector_ret_cache.csv')
+if os.path.exists(_cache_path):
+    try:
+        _ret_df = pd.read_csv(_cache_path, index_col=0)
+        _ret_df.index = _ret_df.index.astype(str)
+        _arr = _ret_df.values
+        _ic_daily = np.full(len(_ret_df), np.nan)
+        for _t in range(1, len(_ret_df)):
+            _a = _arr[_t]; _b = _arr[_t - 1]
+            if not np.isnan(_a).all() and not np.isnan(_b).all():
+                _ra = np.argsort(np.argsort(_a)).astype(float)
+                _rb = np.argsort(np.argsort(_b)).astype(float)
+                if np.std(_ra) > 0 and np.std(_rb) > 0:
+                    _ic_daily[_t] = np.corrcoef(_ra, _rb)[0, 1]
+        rotation_ic = pd.Series(_ic_daily).rolling(10, min_periods=10).mean().values
+        rotation_dates = pd.to_datetime(_ret_df.index).values
+        log(f"轮动数据: {len(rotation_ic)} 天, 最新10日IC={rotation_ic[-1]:+.3f}")
+    except Exception as e:
+        log(f"轮动数据读取失败: {e}")
 last_data_date = str(df['trade_date'].iloc[-1])
 
 N, M1, M2 = 14, 5, 3
@@ -76,7 +99,7 @@ for i in range(N - 1, len(close)):
         k[i] = (rsv * 1 + k[i - 1] * (M1 - 1)) / M1
         d[i] = (k[i] * 1 + d[i - 1] * (M2 - 1)) / M2
 
-# ===== 3. V3 概率系统 (KDJ + 成交量 + MACD + 智能确认) =====
+# ===== 3. V5 概率系统 (KDJ + 成交量 + MACD + 智能确认) =====
 # 3a. MACD 计算
 def ema(data, span):
     result = np.full(len(data), np.nan, dtype=float)
@@ -143,7 +166,7 @@ for i in range(len(close)):
     if not np.isnan(vol_ma5[i]) and not np.isnan(vol_ma20[i]) and vol_ma20[i] > 0:
         vol_trend[i] = (vol_ma5[i] / vol_ma20[i]) - 1.0
 
-# 3c. V3 概率计算
+# 3c. V5 概率计算
 p_up = np.full(len(close), 50.0)
 p_down = np.full(len(close), 50.0)
 p_risk = np.full(len(close), 50.0)
@@ -263,7 +286,7 @@ for i in range(N, len(close)):
     p_down[i] = max(10, min(88, p_down_val))
     p_risk[i] = max(5, min(88, p_risk_val))
 
-# 3d. 方向判定 V3 — Pu/Pdw直接对比，无缓冲 (Pu>Pdw=上升, Pdw>Pu=下跌)
+# 3d. 方向判定 V5 — Pu/Pdw直接对比，无缓冲 (Pu>Pdw=上升, Pdw>Pu=下跌)
 direction = np.full(len(close), 0, dtype=int)  # 1=UP, -1=DOWN
 crosses = []  # 概率交叉点
 for i in range(N, len(close)):
@@ -358,18 +381,42 @@ ax2.set_ylim(-10, 115)
 ax2.set_xlim(dates[0], dates[-1])
 ax2.set_xticklabels([])
 
-# 子图3: 成交量
-vol_colors = [c_down if close[i] >= opens[i] else c_up for i in range(len(close))]
-ax3.bar(dates, vol/1e8, color=vol_colors, alpha=0.6, width=0.7)
-ax3.set_ylabel('成交量(亿手)', color=c_label, fontsize=16)
-ax3.tick_params(colors=c_label, labelsize=12)
-ax3.grid(True, alpha=0.1, color=c_grid)
-ax3.set_xlim(dates[0], dates[-1])
-ax3.xaxis.set_major_formatter(DATE_FMT())
-ax3.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
-ax3.xaxis.set_minor_locator(mdates.DayLocator(interval=5))
-ax3.tick_params(which='minor', colors=c_label, length=3)
-plt.setp(ax3.xaxis.get_majorticklabels(), rotation=0, ha='center', fontsize=12, color=c_label)
+# 子图3: 轮动 (10日IC, 蓝色区块)
+if rotation_ic is not None and rotation_dates is not None:
+    ax3.plot(dates, close, color=c_price, linewidth=1.4, alpha=0.95)
+    _rot = rotation_ic < -0.1
+    i = 0
+    while i < len(_rot):
+        if not _rot[i]:
+            i += 1; continue
+        j = i
+        while j < len(_rot) and _rot[j]:
+            j += 1
+        ax3.axvspan(rotation_dates[i], rotation_dates[min(j, len(_rot) - 1)],
+                    color='#3388ff', alpha=0.25, linewidth=0, zorder=0)
+        i = j
+    ax3.set_ylabel('轮动(10日)', color=c_label, fontsize=16)
+    ax3.tick_params(colors=c_label, labelsize=12)
+    ax3.grid(True, alpha=0.1, color=c_grid)
+    ax3.set_xlim(dates[0], dates[-1])
+    ax3.xaxis.set_major_formatter(DATE_FMT())
+    ax3.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+    ax3.xaxis.set_minor_locator(mdates.DayLocator(interval=5))
+    ax3.tick_params(which='minor', colors=c_label, length=3)
+    plt.setp(ax3.xaxis.get_majorticklabels(), rotation=0, ha='center', fontsize=12, color=c_label)
+else:
+    # 原成交量 (缓存不存在时 fallback)
+    vol_colors = [c_down if close[i] >= opens[i] else c_up for i in range(len(close))]
+    ax3.bar(dates, vol/1e8, color=vol_colors, alpha=0.6, width=0.7)
+    ax3.set_ylabel('成交量(亿手)', color=c_label, fontsize=16)
+    ax3.tick_params(colors=c_label, labelsize=12)
+    ax3.grid(True, alpha=0.1, color=c_grid)
+    ax3.set_xlim(dates[0], dates[-1])
+    ax3.xaxis.set_major_formatter(DATE_FMT())
+    ax3.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+    ax3.xaxis.set_minor_locator(mdates.DayLocator(interval=5))
+    ax3.tick_params(which='minor', colors=c_label, length=3)
+    plt.setp(ax3.xaxis.get_majorticklabels(), rotation=0, ha='center', fontsize=12, color=c_label)
 
 for ax in [ax1, ax2]:
     ax.set_xlim(dates[0], dates[-1])
@@ -410,7 +457,7 @@ if direction[last_idx] == 1:
 else:
     advice = f"Pdw({cur_pd:.0f}%) > Pu({cur_pu:.0f}%) 差值{gap:.0f}%，下跌趋势，观望" if gap >= 10 else f"Pdw略高于Pu，下跌信号偏弱({gap:.0f}%)，关注反转"
 
-msg = f"""【上证指数 KDJ概率系统 V3】{last_data_date}
+msg = f"""【上证指数 KDJ概率系统 V5】{last_data_date}
 当前方向: {cur_dir}
 Pu(上升概率) {cur_pu:.0f}%  |  Pdw(下跌概率) {cur_pd:.0f}%
 {advice}"""
@@ -452,6 +499,9 @@ def upload_file(webhook_key, file_path):
         return ''
 
 for name, key in WEBHOOK_KEYS.items():
+    if '--no-send' in sys.argv:
+        log("跳过企业微信发送 (--no-send)")
+        break
     label = '伯利克利' if name == 'bolikeli' else '大盘趋势'
     log(f"发送到 {label}...")
 
