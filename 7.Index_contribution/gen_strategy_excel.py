@@ -124,14 +124,14 @@ def main():
         })
 
     df = pd.DataFrame(rows)
-    out = os.path.join(OUT_DIR, '大盘扫描策略_2025-2026_v2.xlsx')
+    out = os.path.join(OUT_DIR, '大盘扫描策略_2025-2026.xlsx')
     with pd.ExcelWriter(out, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='大盘扫描策略')
         ws = writer.sheets['大盘扫描策略']
         # 表头加粗 + 冻结首行 + 列宽
         from openpyxl.styles import Font, PatternFill
-        header_font = Font(bold=True, color='FFFFFF')
-        header_fill = PatternFill('solid', fgColor='4472C4')
+        header_font = Font(bold=True, color='000000', size=11)
+        header_fill = PatternFill('solid', fgColor='D9E1F2')
         for c in ws[1]:
             c.font = header_font
             c.fill = header_fill
