@@ -12,10 +12,11 @@
 import numpy as np
 
 
-def compute_direction(close, high, low, vol):
+def compute_direction(close, high, low, vol, return_probs=False):
     """复刻 dapan_scan V3 方向判定。
 
     参数: close/high/low/vol 为 numpy 数组 (按时间升序, 长度一致)。
+          return_probs=True 时返回 (direction, p_down) 元组, p_down 为下跌概率(10~88)。
     返回: direction 数组 (1=上升, -1=下跌, 0=无判定)。
     """
     close = np.asarray(close, dtype=float)
@@ -231,4 +232,6 @@ def compute_direction(close, high, low, vol):
         else:
             direction[i] = -1
 
+    if return_probs:
+        return direction, p_up, p_down
     return direction

@@ -99,7 +99,7 @@ for i in range(N - 1, len(close)):
         k[i] = (rsv * 1 + k[i - 1] * (M1 - 1)) / M1
         d[i] = (k[i] * 1 + d[i - 1] * (M2 - 1)) / M2
 
-# ===== 3. V5 概率系统 (KDJ + 成交量 + MACD + 智能确认) =====
+# ===== 3. V6 概率系统 (KDJ + 成交量 + MACD + 智能确认) =====
 # 3a. MACD 计算
 def ema(data, span):
     result = np.full(len(data), np.nan, dtype=float)
@@ -166,7 +166,7 @@ for i in range(len(close)):
     if not np.isnan(vol_ma5[i]) and not np.isnan(vol_ma20[i]) and vol_ma20[i] > 0:
         vol_trend[i] = (vol_ma5[i] / vol_ma20[i]) - 1.0
 
-# 3c. V5 概率计算
+# 3c. V6 概率计算
 p_up = np.full(len(close), 50.0)
 p_down = np.full(len(close), 50.0)
 p_risk = np.full(len(close), 50.0)
@@ -286,17 +286,20 @@ for i in range(N, len(close)):
     p_down[i] = max(10, min(88, p_down_val))
     p_risk[i] = max(5, min(88, p_risk_val))
 
-# 3d. 方向判定 V5 — Pu/Pdw直接对比，无缓冲 (Pu>Pdw=上升, Pdw>Pu=下跌)
+# 3d. 方向判定 V6 — 斜率信号: Pu 5日斜率>0(恐慌缓解) 或 Pu>60(强势) = 上升, 否则 = 下跌
+#     (回测证明斜率信号在大盘择时远优于 Pu>Pdw: 上证 +293.6% vs +166.5%, 见 7.Index_contribution/output/../rotation-backtest.md)
 direction = np.full(len(close), 0, dtype=int)  # 1=UP, -1=DOWN
-crosses = []  # 概率交叉点
+crosses = []  # 斜率信号翻转点(转上升=golden, 转下跌=death)
+signal = np.zeros(len(close), dtype=bool)      # True=上升
+for i in range(len(close)):
+    slope = (p_up[i] - p_up[i - 5]) if i >= 5 else 0.0
+    signal[i] = (slope > 0) or (p_up[i] > 60)
 for i in range(N, len(close)):
-    if p_up[i] > p_down[i]:
-        direction[i] = 1
-        if p_up[i-1] <= p_down[i-1]:
+    direction[i] = 1 if signal[i] else -1
+    if i > N:
+        if signal[i] and not signal[i - 1]:
             crosses.append((i, 1, 'golden'))
-    else:
-        direction[i] = -1
-        if p_up[i-1] >= p_down[i-1]:
+        elif not signal[i] and signal[i - 1]:
             crosses.append((i, -1, 'death'))
 
 # ===== 4. 生成图表 =====
@@ -449,17 +452,23 @@ log(f"✅ 图表已保存: {chart_path}")
 last_idx = len(close) - 1
 cur_k = k[last_idx]; cur_d = d[last_idx]
 cur_pu = p_up[last_idx]; cur_pd = p_down[last_idx]
+cur_slope = (p_up[last_idx] - p_up[last_idx - 5]) if last_idx >= 5 else 0.0
 cur_dir = "↑上升" if direction[last_idx] == 1 else "↓下跌"
-gap = abs(cur_pu - cur_pd)
 
 if direction[last_idx] == 1:
-    advice = f"Pu({cur_pu:.0f}%) > Pdw({cur_pd:.0f}%) 差值{gap:.0f}%，上升趋势" if gap >= 10 else f"Pu略高于Pdw，上升信号偏弱({gap:.0f}%)，注意确认"
+    reasons = []
+    if cur_pu > 60: reasons.append(f"Pu {cur_pu:.0f}>60(强势)")
+    if cur_slope > 0: reasons.append(f"斜率{cur_slope:+.0f}(回升)")
+    advice = "上升趋势 — " + ("、".join(reasons) if reasons else "信号偏弱")
 else:
-    advice = f"Pdw({cur_pd:.0f}%) > Pu({cur_pu:.0f}%) 差值{gap:.0f}%，下跌趋势，观望" if gap >= 10 else f"Pdw略高于Pu，下跌信号偏弱({gap:.0f}%)，关注反转"
+    reasons = []
+    if cur_pu <= 60: reasons.append(f"Pu {cur_pu:.0f}≤60(偏弱)")
+    if cur_slope <= 0: reasons.append(f"斜率{cur_slope:+.0f}(未回升)")
+    advice = "下跌趋势 — " + "、".join(reasons)
 
-msg = f"""【上证指数 KDJ概率系统 V5】{last_data_date}
+msg = f"""【上证指数 KDJ概率系统 V6】{last_data_date}
 当前方向: {cur_dir}
-Pu(上升概率) {cur_pu:.0f}%  |  Pdw(下跌概率) {cur_pd:.0f}%
+Pu(上升概率) {cur_pu:.0f}%  |  5日斜率 {cur_slope:+.0f}
 {advice}"""
 
 # ===== 6. 发送到企业微信（多群） =====

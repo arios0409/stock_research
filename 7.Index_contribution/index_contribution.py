@@ -26,9 +26,19 @@
   python3 index_contribution.py --hs300        # 仅沪深300
 """
 
-import urllib.request, json, time, sys, os, re
+import urllib.request, json, time, sys, os, re, csv
 from datetime import datetime, timedelta
 from collections import defaultdict
+
+# ===== 可视化 (可选, 需 matplotlib) =====
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib import font_manager as fm
+    _HAS_MPL = True
+except Exception:
+    _HAS_MPL = False
 
 # ===== 配置 =====
 API_URL = 'http://api.tushare.pro'
@@ -185,6 +195,50 @@ def find_last_trade_day(target_date=None):
             return ds
         time.sleep(0.12)
     raise SystemExit('[FATAL] 15天内未找到交易日')
+
+
+def find_prev_trade_day(trade_date):
+    """给定交易日, 返回其前一个交易日"""
+    d = datetime.strptime(trade_date, '%Y%m%d')
+    prev = (d - timedelta(days=1)).strftime('%Y%m%d')
+    return find_last_trade_day(prev)
+
+
+def load_rets(trade_date, windows=(5, 10, 20)):
+    """从 sector_ret_cache.csv 读板块多周期累计涨幅(简单累加%), 返回 {行业: {窗口: 涨幅%}}。
+
+    cache 由 rotation_regime.py 生成, 口径=申万一级行业简单平均涨跌幅(与轮动扫描一致)。
+    """
+    cache = os.path.join(SCRIPT_DIR, 'output', 'sector_ret_cache.csv')
+    if not os.path.exists(cache):
+        return {}
+    try:
+        with open(cache, encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            if not header:
+                return {}
+            cols = header[1:]          # 首列是空字符串(日期索引列)
+            dated = []
+            for line in reader:
+                if len(line) >= 2:
+                    dated.append((line[0], line[1:]))
+    except Exception as e:
+        print(f'  [WARN] 读 sector_ret_cache 失败: {e}', file=sys.stderr)
+        return {}
+    window = [d for d in dated if d[0] <= trade_date][-max(windows):]
+    if not window:
+        return {}
+    acc = {}
+    for w in windows:
+        for _, vals in window[-w:]:
+            for c, v in zip(cols, vals):
+                try:
+                    d = acc.setdefault(c, {})
+                    d[w] = d.get(w, 0.0) + float(v)
+                except (ValueError, TypeError):
+                    pass
+    return acc
 
 
 def get_trade_days(start_date, end_date):
@@ -388,6 +442,146 @@ def save_range_csv(code, agg, start_date, end_date):
     print(f"[CSV] {path}", file=sys.stderr)
 
 
+def _setup_font():
+    for fp in ['/mnt/c/Windows/Fonts/simhei.ttf', '/mnt/c/Windows/Fonts/msyh.ttc']:
+        if os.path.exists(fp):
+            fm.fontManager.addfont(fp)
+    plt.rcParams['font.sans-serif'] = ['SimHei'] + plt.rcParams.get('font.sans-serif', [])
+    plt.rcParams['axes.unicode_minus'] = False
+
+
+def draw_diverging(names, contribs, weights, title, subtitle, outpath, deltas=None, rets=None,
+                   windows=(5, 10, 20)):
+    """发散横条图: 正值(拉涨)向右红, 负值(砸盘)向左绿
+
+    deltas: 与 names 同序的「贡献环比变化」(今日−昨日, pt), 可选
+    rets:   与 names 同序的「多周期累计涨幅」dict {窗口: 涨幅%}, 元素可为 None, 可选
+    windows: 涨幅周期列表(升序, 如 5/10/20 日)
+    """
+    if not _HAS_MPL:
+        return
+    _setup_font()
+    order = sorted(range(len(names)), key=lambda i: -contribs[i])
+    names = [names[i] for i in order]
+    contribs = [contribs[i] for i in order]
+    weights = [weights[i] for i in order] if weights else [0.0] * len(order)
+    deltas = [deltas[i] for i in order] if deltas else None
+    rets = [rets[i] for i in order] if rets else None
+
+    c_bg = '#0d1117'
+    c_up = '#e0443a'   # 拉涨 = 红
+    c_dn = '#21a05f'   # 砸盘 = 绿
+    c_txt = '#e8eaed'
+    c_sub = '#8b949e'
+
+    n = len(names)
+    h = max(7.0, 1.1 + n * 0.34)
+    fig, ax = plt.subplots(figsize=(14, h), facecolor=c_bg)
+    ax.set_facecolor(c_bg)
+
+    maxabs = max([abs(c) for c in contribs] or [1])
+    colors = [c_up if c >= 0 else c_dn for c in contribs]
+    ax.barh(range(n), contribs, color=colors, height=0.62, zorder=3, alpha=0.93)
+    ax.axvline(0, color='#3d444d', linewidth=1.2, zorder=2)
+    ax.set_xlim(-maxabs * 3.7, maxabs * 2.0)
+    ax.invert_yaxis()
+    ax.set_yticks([])
+    ax.set_xticks([])
+    for sp in ['top', 'right', 'bottom', 'left']:
+        ax.spines[sp].set_visible(False)
+
+    # 左侧多列: 权重%(灰,右对齐) | 行业名(白,粗体) | 5/10/20日涨幅(红涨绿跌)
+    #   位置用 maxabs 倍数定位 → 固定像素间距, 给最长负bar的末端标注留足空间
+    WINDOW_X = {5: 2.82, 10: 2.44, 20: 2.06}   # 各周期涨幅列左对齐位置(×maxabs, 左侧为负)
+    # 列分隔竖线: 行业名|5日、5日|10日、10日|20日 (置于相邻两列空隙中点)
+    for sx in (2.87, 2.49, 2.11):
+        ax.plot([-maxabs * sx, -maxabs * sx], [-0.5, n - 0.5],
+                color='#3d444d', linewidth=0.8, alpha=0.55, zorder=2)
+    for i in range(n):
+        ax.text(-maxabs * 3.37, i, f'{weights[i]:.1f}%', va='center', ha='right',
+                color=c_sub, fontsize=10)
+        ax.text(-maxabs * 3.27, i, names[i], va='center', ha='left',
+                color=c_txt, fontsize=12, fontweight='bold')
+        if rets is not None and rets[i] is not None:
+            for w in windows:
+                rv = rets[i].get(w)
+                if rv is not None:
+                    ax.text(-maxabs * WINDOW_X[w], i, f'{w}日{rv:+.1f}%', va='center', ha='left',
+                            color=(c_up if rv >= 0 else c_dn), fontsize=8)
+
+    # 条末端: 贡献 pt (粗体彩色) + 环比箭头(↑↓, 较前日增减)
+    for i in range(n):
+        c = contribs[i]
+        x = c + (0.03 * maxabs if c >= 0 else -0.03 * maxabs)
+        ha = 'left' if c >= 0 else 'right'
+        c_label = '0.00' if abs(c) < 0.005 else f'{c:+.2f}'
+        ax.text(x, i, f'{c_label}pt', va='center', ha=ha,
+                color=colors[i], fontsize=11, fontweight='bold')
+        if deltas is not None:
+            d = deltas[i]
+            if abs(d) < 0.005:
+                s, dcol = '→', c_sub
+            else:
+                s = f'{"↑" if d > 0 else "↓"}{abs(d):.2f}'
+                dcol = c_up if d > 0 else c_dn
+            xd = x + (0.42 * maxabs if c >= 0 else -0.42 * maxabs)
+            ax.text(xd, i, s, va='center', ha=ha, color=dcol, fontsize=9)
+
+    ax.set_title(title, color=c_txt, fontsize=16, fontweight='bold', pad=16, loc='left')
+    if subtitle:
+        ax.text(0, 1.015, subtitle, transform=ax.transAxes, color='#b8c0cc', fontsize=10.5, va='bottom')
+
+    os.makedirs(os.path.dirname(outpath), exist_ok=True)
+    fig.savefig(outpath, dpi=150, facecolor=c_bg, bbox_inches='tight')
+    plt.close(fig)
+    print(f'[图表] {outpath}', file=sys.stderr)
+
+
+def save_chart(res, prev_contrib=None, rets=None, windows=(5, 10, 20)):
+    """单日板块贡献发散图 (可叠加前日贡献环比 + 多周期累计涨幅)"""
+    if not _HAS_MPL:
+        return
+    rows = res['rows']
+    names = [r['name'] for r in rows]
+    contribs = [r['contrib'] for r in rows]
+    weights = [r['w'] for r in rows]
+    deltas = None
+    if prev_contrib:
+        deltas = [r['contrib'] - prev_contrib.get(r['name'], 0.0) for r in rows]
+    rets_list = None
+    if rets:
+        rets_list = [rets.get(r['name']) for r in rows]
+    idx_pct = res.get('idx_pct')
+    title = f"{res['name']} ({res['code']}) 板块贡献归因  @ {res['date']}"
+    sub_parts = []
+    if idx_pct is not None:
+        dev = res['total_contrib'] - idx_pct
+        sub_parts.append(f"指数涨跌 {idx_pct:+.2f}%   Σ贡献 {res['total_contrib']:+.2f}pt   重构误差 {dev:+.2f}pt")
+    sub_parts.append('红=拉涨  绿=砸盘  最左列=权重占比%')
+    if deltas is not None:
+        sub_parts.append('↑↓=贡献较前日增减(pt)  5/10/20日=板块多周期累计涨幅')
+    subtitle = '      '.join(sub_parts)
+    outpath = os.path.join(SCRIPT_DIR, 'output', f"{res['code'].split('.')[0]}_{res['date']}_板块贡献.png")
+    draw_diverging(names, contribs, weights, title, subtitle, outpath,
+                   deltas=deltas, rets=rets_list, windows=windows)
+
+
+def save_range_chart(name, code, agg, start_date, end_date, n_days):
+    """区间累计贡献发散图"""
+    if not _HAS_MPL:
+        return
+    rows = [{'name': l1, 'avg_w': (d['w_sum'] / d['n'] if d['n'] else 0), 'contrib': d['contrib']}
+            for l1, d in agg.items()]
+    names = [r['name'] for r in rows]
+    contribs = [r['contrib'] for r in rows]
+    weights = [r['avg_w'] for r in rows]
+    title = f"{name} ({code}) 区间板块累计贡献  {n_days} 个交易日"
+    code_short = code.split('.')[0]
+    outpath = os.path.join(SCRIPT_DIR, 'output', f"{code_short}_{start_date}_{end_date}_区间累计贡献.png")
+    draw_diverging(names, contribs, weights, title,
+                   f"{start_date} → {end_date}   红=拉涨  绿=砸盘  最左列=平均权重%", outpath)
+
+
 def print_range_result(name, code, agg, arith_ret, geom_ret, n_days):
     print()
     print('=' * 74)
@@ -462,9 +656,11 @@ def run_range(start_date, end_date, do_sh, do_hs300):
     if do_sh:
         print_range_result('上证综指', '000001.SH', sh_agg, sh_arith, sh_geom, len(trade_days))
         save_range_csv('000001', sh_agg, start_date, end_date)
+        save_range_chart('上证综指', '000001.SH', sh_agg, start_date, end_date, len(trade_days))
     if do_hs300:
         print_range_result('沪深300', '000300.SH', hs_agg, hs_arith, hs_geom, len(trade_days))
         save_range_csv('000300', hs_agg, start_date, end_date)
+        save_range_chart('沪深300', '000300.SH', hs_agg, start_date, end_date, len(trade_days))
 
 
 def main():
@@ -489,16 +685,27 @@ def main():
     trade_date = find_last_trade_day(target)
     print(f"[信息] 交易日: {trade_date}", file=sys.stderr)
 
+    # 前一个交易日 + 板块多周期累计涨幅 (用于图内对比表达)
+    prev_date = find_prev_trade_day(trade_date)
+    rets = load_rets(trade_date)
+    print(f"[信息] 前一日: {prev_date}   多周期涨幅缓存: {'有' if rets else '无'}", file=sys.stderr)
+
     industry_map = fetch_industry_map()
 
     if do_sh:
         res, el = attribution_sh(trade_date, industry_map)
+        prev_res, _ = attribution_sh(prev_date, industry_map)
+        prev_contrib = {r['name']: r['contrib'] for r in prev_res['rows']}
         print_result(res, el)
         save_csv(res)
+        save_chart(res, prev_contrib=prev_contrib, rets=rets)
     if do_hs300:
         res, el = attribution_hs300(trade_date, industry_map)
+        prev_res, _ = attribution_hs300(prev_date, industry_map)
+        prev_contrib = {r['name']: r['contrib'] for r in prev_res['rows']}
         print_result(res, el)
         save_csv(res)
+        save_chart(res, prev_contrib=prev_contrib, rets=rets)
 
 
 if __name__ == '__main__':

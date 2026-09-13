@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-沪深300趋势扫描 V2 — Pu/Pdw概率交叉版（无状态机，即时应）
+沪深300趋势扫描 V6 — 斜率信号版 (Pu 5日斜率>0 或 Pu>60 = 上升)
 """
 import sys, os, json, urllib.request, traceback, re
 from datetime import datetime, timedelta
@@ -32,12 +32,12 @@ os.makedirs(os.path.join(BASE_DIR, OUTPUT_SUBDIR), exist_ok=True)
 
 def log(msg):
     ts_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    line = f"[{ts_str}] [HS300v2] {msg}"
+    line = f"[{ts_str}] [HS300v6] {msg}"
     print(line)
     with open(LOG_FILE, 'a', encoding='utf-8') as f:
         f.write(line + '\n')
 
-log("========== 沪深300趋势扫描 V2 开始 ==========")
+log("========== 沪深300趋势扫描 V6 开始 ==========")
 
 # Font
 for fp in ['/mnt/c/Windows/Fonts/simhei.ttf', '/mnt/c/Windows/Fonts/msyh.ttc']:
@@ -107,7 +107,7 @@ for i in range(len(close)):
     if not np.isnan(vol_ma5[i]) and not np.isnan(vol_ma20[i]) and vol_ma20[i]>0:
         vol_trend[i] = vol_ma5[i]/vol_ma20[i] - 1
 
-# ===== 5. V3 Probability (same as before) =====
+# ===== 5. V6 Probability (same as before) =====
 p_up = np.full(len(close), 50.); p_down = np.full(len(close), 50.); p_risk = np.full(len(close), 50.)
 up_days = down_days = risk_days = 0
 
@@ -170,17 +170,19 @@ for i in range(N, len(close)):
     p_down[i] = max(10, min(88, p_down_val))
     p_risk[i] = max(5, min(88, p_risk_val))
 
-# ===== 6. Direction: Pu > Pdw = UP, Pdw > Pu = DOWN (no state machine) =====
+# ===== 6. Direction V6: Pu 5日斜率>0(恐慌缓解) 或 Pu>60(强势) = UP, 否则 = DOWN =====
 direction = np.full(len(close), 0, dtype=int)  # 1=UP, -1=DOWN
-crosses = []  # (idx, direction, event_type)
+crosses = []  # 斜率信号翻转点(转上升=golden, 转下跌=death)
+signal = np.zeros(len(close), dtype=bool)      # True=上升
+for i in range(len(close)):
+    slope = (p_up[i] - p_up[i - 5]) if i >= 5 else 0.0
+    signal[i] = (slope > 0) or (p_up[i] > 60)
 for i in range(N, len(close)):
-    if p_up[i] > p_down[i]:
-        direction[i] = 1
-        if p_up[i-1] <= p_down[i-1]:  # just crossed up
+    direction[i] = 1 if signal[i] else -1
+    if i > N:
+        if signal[i] and not signal[i - 1]:
             crosses.append((i, 1, 'golden'))
-    else:
-        direction[i] = -1
-        if p_up[i-1] >= p_down[i-1]:  # just crossed down
+        elif not signal[i] and signal[i - 1]:
             crosses.append((i, -1, 'death'))
 
 # ===== 7. Chart =====
@@ -289,7 +291,7 @@ for ax in [ax1, ax2, ax3, ax4]:
     ax.tick_params(which='minor', colors=c_label, length=3)
 plt.setp(ax4.xaxis.get_majorticklabels(), rotation=0, ha='center', fontsize=11, color=c_label)
 
-chart_path = os.path.join(BASE_DIR, OUTPUT_SUBDIR, f'{last_data_date}_{INDEX_NAME}_趋势图_v2.png')
+chart_path = os.path.join(BASE_DIR, OUTPUT_SUBDIR, f'{last_data_date}_{INDEX_NAME}_趋势图_v6.png')
 fig.savefig(chart_path, dpi=150, facecolor=c_bg)
 plt.close(fig)
 log(f"图表已保存: {chart_path}")
@@ -298,16 +300,22 @@ log(f"图表已保存: {chart_path}")
 last_idx = len(close)-1
 cur_dir = "↑上升" if direction[last_idx] == 1 else "↓下跌"
 cur_pu = p_up[last_idx]; cur_pd = p_down[last_idx]
-gap = abs(cur_pu - cur_pd)
+cur_slope = (p_up[last_idx] - p_up[last_idx - 5]) if last_idx >= 5 else 0.0
 
 if direction[last_idx] == 1:
-    advice = f"Pu({cur_pu:.0f}%) > Pdw({cur_pd:.0f}%) 差值{gap:.0f}%，上升趋势" if gap >= 10 else f"Pu略高于Pdw，上升信号偏弱({gap:.0f}%)，注意确认"
+    reasons = []
+    if cur_pu > 60: reasons.append(f"Pu {cur_pu:.0f}>60(强势)")
+    if cur_slope > 0: reasons.append(f"斜率{cur_slope:+.0f}(回升)")
+    advice = "上升趋势 — " + ("、".join(reasons) if reasons else "信号偏弱")
 else:
-    advice = f"Pdw({cur_pd:.0f}%) > Pu({cur_pu:.0f}%) 差值{gap:.0f}%，下跌趋势，观望" if gap >= 10 else f"Pdw略高于Pu，下跌信号偏弱({gap:.0f}%)，关注反转"
+    reasons = []
+    if cur_pu <= 60: reasons.append(f"Pu {cur_pu:.0f}≤60(偏弱)")
+    if cur_slope <= 0: reasons.append(f"斜率{cur_slope:+.0f}(未回升)")
+    advice = "下跌趋势 — " + "、".join(reasons)
 
-msg = f"""【{INDEX_NAME} Pu/Pdw概率交叉】{last_data_date}
+msg = f"""【{INDEX_NAME} KDJ概率系统 V6】{last_data_date}
 当前方向: {cur_dir}
-Pu(上升概率) {cur_pu:.0f}%  |  Pdw(下跌概率) {cur_pd:.0f}%
+Pu(上升概率) {cur_pu:.0f}%  |  5日斜率 {cur_slope:+.0f}
 {advice}"""
 
 # ===== 9. Send =====
@@ -342,16 +350,20 @@ def upload_file(webhook_key, file_path):
         log(f'上传异常: {e}')
         return ''
 
-for name, key in WEBHOOK_KEYS.items():
-    label = '伯利克利' if name == 'bolikeli' else '大盘趋势'
-    log(f"发送到 {label}...")
-    mid = upload_file(key, chart_path)
-    if mid:
-        r = post(key, {'msgtype': 'file', 'file': {'media_id': mid}})
-        log(f'  图表: {r}')
-    else:
-        log(f'  图表上传失败')
-    r = post(key, {'msgtype': 'markdown', 'markdown': {'content': msg}})
-    log(f'  文字: {r}')
+if '--no-send' in sys.argv:
+    log("跳过企业微信发送 (--no-send)")
+    print(msg)
+else:
+    for name, key in WEBHOOK_KEYS.items():
+        label = '伯利克利' if name == 'bolikeli' else '大盘趋势'
+        log(f"发送到 {label}...")
+        mid = upload_file(key, chart_path)
+        if mid:
+            r = post(key, {'msgtype': 'file', 'file': {'media_id': mid}})
+            log(f'  图表: {r}')
+        else:
+            log(f'  图表上传失败')
+        r = post(key, {'msgtype': 'markdown', 'markdown': {'content': msg}})
+        log(f'  文字: {r}')
 
-log("========== 沪深300趋势扫描 V2 完成 ==========")
+log("========== 沪深300趋势扫描 V6 完成 ==========")
