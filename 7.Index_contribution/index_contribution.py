@@ -475,7 +475,7 @@ def draw_diverging(names, contribs, weights, title, subtitle, outpath, deltas=No
     c_sub = '#8b949e'
 
     n = len(names)
-    h = max(7.0, 1.1 + n * 0.34)
+    h = max(7.0, 1.1 + n * 0.42)
     fig, ax = plt.subplots(figsize=(14, h), facecolor=c_bg)
     ax.set_facecolor(c_bg)
 
@@ -499,15 +499,15 @@ def draw_diverging(names, contribs, weights, title, subtitle, outpath, deltas=No
                 color='#3d444d', linewidth=0.8, alpha=0.55, zorder=2)
     for i in range(n):
         ax.text(-maxabs * 3.37, i, f'{weights[i]:.1f}%', va='center', ha='right',
-                color=c_sub, fontsize=10)
+                color=c_sub, fontsize=11)
         ax.text(-maxabs * 3.27, i, names[i], va='center', ha='left',
-                color=c_txt, fontsize=12, fontweight='bold')
+                color=c_txt, fontsize=14, fontweight='bold')
         if rets is not None and rets[i] is not None:
             for w in windows:
                 rv = rets[i].get(w)
                 if rv is not None:
                     ax.text(-maxabs * WINDOW_X[w], i, f'{w}日{rv:+.1f}%', va='center', ha='left',
-                            color=(c_up if rv >= 0 else c_dn), fontsize=8)
+                            color=(c_up if rv >= 0 else c_dn), fontsize=10)
 
     # 条末端: 贡献 pt (粗体彩色) + 环比箭头(↑↓, 较前日增减)
     for i in range(n):
@@ -516,7 +516,7 @@ def draw_diverging(names, contribs, weights, title, subtitle, outpath, deltas=No
         ha = 'left' if c >= 0 else 'right'
         c_label = '0.00' if abs(c) < 0.005 else f'{c:+.2f}'
         ax.text(x, i, f'{c_label}pt', va='center', ha=ha,
-                color=colors[i], fontsize=11, fontweight='bold')
+                color=colors[i], fontsize=12.5, fontweight='bold')
         if deltas is not None:
             d = deltas[i]
             if abs(d) < 0.005:
@@ -525,11 +525,11 @@ def draw_diverging(names, contribs, weights, title, subtitle, outpath, deltas=No
                 s = f'{"↑" if d > 0 else "↓"}{abs(d):.2f}'
                 dcol = c_up if d > 0 else c_dn
             xd = x + (0.42 * maxabs if c >= 0 else -0.42 * maxabs)
-            ax.text(xd, i, s, va='center', ha=ha, color=dcol, fontsize=9)
+            ax.text(xd, i, s, va='center', ha=ha, color=dcol, fontsize=10)
 
-    ax.set_title(title, color=c_txt, fontsize=16, fontweight='bold', pad=16, loc='left')
+    ax.set_title(title, color=c_txt, fontsize=18, fontweight='bold', pad=16, loc='left')
     if subtitle:
-        ax.text(0, 1.015, subtitle, transform=ax.transAxes, color='#b8c0cc', fontsize=10.5, va='bottom')
+        ax.text(0, 1.03, subtitle, transform=ax.transAxes, color='#b8c0cc', fontsize=11.5, va='bottom')
 
     os.makedirs(os.path.dirname(outpath), exist_ok=True)
     fig.savefig(outpath, dpi=150, facecolor=c_bg, bbox_inches='tight')

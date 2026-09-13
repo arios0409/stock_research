@@ -113,34 +113,39 @@ def main():
     is_trend = cur_ic > TREND_THRESHOLD
     is_rot = cur_ic < -ROT_THRESHOLD
 
-    # ===== 3. Pu 斜率过滤 =====
+    # ===== 3. Pu 斜率过滤 (方向 = V6斜率信号) =====
     pu = load_pu(df.index)
     cur_pu = pu[-1]
     cur_slope = pu[-1] - pu[-1 - SLOPE_WINDOW] if n_days > SLOPE_WINDOW else 0.0
     rev_pass = (cur_slope > 0) or (cur_pu > PU_LEVEL)
+    direction = '上升' if rev_pass else '下跌'
 
     # ===== 4. 分支生成建议 =====
     if is_trend:
-        state = '持续市'
         ret = df.rolling(MOM_WINDOW, min_periods=MOM_WINDOW).sum().iloc[-1]
         top = ret.sort_values(ascending=False).head(TOPN)
+        state_tag = f'{direction}持续'
         action = '追动量，买20日涨幅 top5'
+        action_color = 'info'      # 绿(买入)
         sectors = [(s, ret[s]) for s in top.index]
     elif is_rot:
         if not rev_pass:
             # 空仓: 轮动市但斜率过滤不通过 → 不给板块, 但仍发贡献图
-            state = '轮动市'
-            action = f'空仓，不操作 (Pu {cur_pu:.0f}, 斜率 {cur_slope:+.0f})'
+            state_tag = f'{direction}轮动'
+            action = '空仓，不操作'
+            action_color = 'warning'  # 红(空仓)
             sectors = []
         else:
-            state = '轮动市'
             ret = df.rolling(REV_WINDOW, min_periods=REV_WINDOW).sum().iloc[-1]
             top = ret.sort_values(ascending=True).head(TOPN)
-            action = '做反转，买40日跌幅 top5 (Pu斜率回升)'
+            state_tag = f'{direction}轮动'
+            action = '做反转，买40日跌幅 top5'
+            action_color = 'info'      # 绿(买入)
             sectors = [(s, ret[s]) for s in top.index]
     else:
-        state = '中性市'
+        state_tag = '中性'
         action = '躺平，尽量买小权重'
+        action_color = 'warning'  # 红(躺平)
         sectors = []
 
     # ===== 5. 生成板块贡献图 (沪深300 + 上证) =====
@@ -151,8 +156,8 @@ def main():
 
     # ===== 6. 文字消息 =====
     lines = [f'【轮动策略提示】{trade_date}',
-             f'市场状态: <font color=\"info\">{state}</font> (10日IC {cur_ic:+.3f})',
-             f'打法: {action}']
+             f'{state_tag} -- <font color="{action_color}">{action}</font>',
+             f'(10日IC {cur_ic:+.3f} | Pu {cur_pu:.0f} | 斜率 {cur_slope:+.0f})']
     if sectors:
         lines.append('')
         for i, (s, ret) in enumerate(sectors, 1):
@@ -171,7 +176,7 @@ def main():
             send_image(key, chart_hs)
         print('[发送完成]', file=sys.stderr)
 
-    print(f'[轮动策略] {trade_date} {state}: {action}', file=sys.stderr)
+    print(f'[轮动策略] {trade_date} {state_tag}: {action}', file=sys.stderr)
 
 
 if __name__ == '__main__':
