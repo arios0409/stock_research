@@ -5,11 +5,11 @@
 =====================================
 根据市场状态(10日IC) + Pu斜率过滤, 给出操作建议 + 板块贡献图 + 发送企业微信。
 
-状态分支:
+状态分支 (板块贡献图始终发送: 沪深300 + 上证):
   持续市(10日IC > +0.1)        → 追动量, 20日涨幅 top5
   轮动市(10日IC < -0.1):
     斜率过滤通过(斜率>0 或 Pu>60) → 做反转, 40日跌幅 top5
-    斜率过滤不通过               → 空仓, 不发送
+    斜率过滤不通过               → 空仓, 不给板块
   中性市(其余)                 → 躺平, 提示「躺平，尽量买小权重」
 
 板块贡献图: 沪深300 + 上证 (调用 index_contribution.py 生成)
@@ -128,15 +128,16 @@ def main():
         sectors = [(s, ret[s]) for s in top.index]
     elif is_rot:
         if not rev_pass:
-            # 空仓: 轮动市但斜率过滤不通过
-            print(f'[轮动策略] {trade_date} 轮动市(IC {cur_ic:+.3f}) 但斜率过滤不通过 '
-                  f'(Pu {cur_pu:.0f}, 斜率 {cur_slope:+.0f}) → 空仓, 不发送', file=sys.stderr)
-            return
-        state = '轮动市'
-        ret = df.rolling(REV_WINDOW, min_periods=REV_WINDOW).sum().iloc[-1]
-        top = ret.sort_values(ascending=True).head(TOPN)
-        action = '做反转，买40日跌幅 top5 (Pu斜率回升)'
-        sectors = [(s, ret[s]) for s in top.index]
+            # 空仓: 轮动市但斜率过滤不通过 → 不给板块, 但仍发贡献图
+            state = '轮动市'
+            action = f'空仓，不操作 (Pu {cur_pu:.0f}, 斜率 {cur_slope:+.0f})'
+            sectors = []
+        else:
+            state = '轮动市'
+            ret = df.rolling(REV_WINDOW, min_periods=REV_WINDOW).sum().iloc[-1]
+            top = ret.sort_values(ascending=True).head(TOPN)
+            action = '做反转，买40日跌幅 top5 (Pu斜率回升)'
+            sectors = [(s, ret[s]) for s in top.index]
     else:
         state = '中性市'
         action = '躺平，尽量买小权重'
