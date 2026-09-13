@@ -164,6 +164,7 @@ def main():
              f'(10日IC {cur_ic:+.3f} | Pu {cur_pu:.0f} | Pd {cur_pd:.0f} | 斜率 {cur_slope:+.0f})']
     if sectors:
         lines.append('')
+        lines.append('**买入板块：**')
         for i, (s, ret) in enumerate(sectors, 1):
             lines.append(f'{i}. {s} ({ret:+.1f}%)')
     msg = '\n'.join(lines)
