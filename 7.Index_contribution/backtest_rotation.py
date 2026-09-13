@@ -204,7 +204,7 @@ def main():
         # 上: 三条净值曲线
         ax1.set_facecolor(c_bg)
         series = [
-            ('A_equal_hold', 'A 等权基准(躺平)', '#8b949e', 1.4, ':'),
+            ('A_equal_hold', 'A 等权基准(持仓)', '#8b949e', 1.4, ':'),
             ('D_switch', 'D 状态切换', '#e0443a', 1.6, '-'),
             ('E_switch_f', 'E 状态切换+斜率过滤(最优)', '#ffd166', 2.4, '-'),
         ]
