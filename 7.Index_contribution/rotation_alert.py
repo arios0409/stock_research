@@ -60,14 +60,17 @@ def rank_ic(a, b):
 
 
 def load_pu(df_index):
-    """读 sh_index_daily.csv 算 Pu, 对齐到板块数据日期, 返回 pu 数组"""
+    """读 sh_index_daily.csv 算 Pu/Pd, 对齐到板块数据日期, 返回 (pu, pd) 数组"""
     sh_path = os.path.join(SCRIPT_DIR, 'output', 'sh_index_daily.csv')
     sh = pd.read_csv(sh_path)
-    _, p_up, _ = dapan_direction.compute_direction(
+    _, p_up, p_down = dapan_direction.compute_direction(
         sh['close'].values, sh['high'].values, sh['low'].values, sh['vol'].values,
         return_probs=True)
     pu_map = dict(zip(sh['trade_date'].astype(str), p_up))
-    return np.array([pu_map.get(td, 50.0) for td in df_index])
+    pd_map = dict(zip(sh['trade_date'].astype(str), p_down))
+    pu = np.array([pu_map.get(td, 50.0) for td in df_index])
+    pd_ = np.array([pd_map.get(td, 50.0) for td in df_index])
+    return pu, pd_
 
 
 def post(webhook_key, payload):
@@ -114,8 +117,9 @@ def main():
     is_rot = cur_ic < -ROT_THRESHOLD
 
     # ===== 3. Pu 斜率过滤 (方向 = V6斜率信号) =====
-    pu = load_pu(df.index)
+    pu, pd_ = load_pu(df.index)
     cur_pu = pu[-1]
+    cur_pd = pd_[-1]
     cur_slope = pu[-1] - pu[-1 - SLOPE_WINDOW] if n_days > SLOPE_WINDOW else 0.0
     rev_pass = (cur_slope > 0) or (cur_pu > PU_LEVEL)
     direction = '上升' if rev_pass else '下跌'
@@ -157,7 +161,7 @@ def main():
     # ===== 6. 文字消息 =====
     lines = [f'【轮动策略提示】{trade_date}',
              f'{state_tag} -- <font color="{action_color}">{action}</font>',
-             f'(10日IC {cur_ic:+.3f} | Pu {cur_pu:.0f} | 斜率 {cur_slope:+.0f})']
+             f'(10日IC {cur_ic:+.3f} | Pu {cur_pu:.0f} | Pd {cur_pd:.0f} | 斜率 {cur_slope:+.0f})']
     if sectors:
         lines.append('')
         for i, (s, ret) in enumerate(sectors, 1):
