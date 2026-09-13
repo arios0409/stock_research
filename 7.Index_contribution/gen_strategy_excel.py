@@ -107,7 +107,7 @@ def main():
                     state_tag = f'{direction}轮动' if direction != '—' else '轮动'
             else:
                 regime = '中性市'
-                strategy = '躺平，尽量买小权重'
+                strategy = '持仓'
                 state_tag = '中性'
         rows.append({
             '日期': td,

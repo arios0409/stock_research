@@ -10,7 +10,7 @@
   轮动市(10日IC < -0.1):
     斜率过滤通过(斜率>0 或 Pu>60) → 做反转, 40日跌幅 top5
     斜率过滤不通过               → 空仓, 不给板块
-  中性市(其余)                 → 躺平, 提示「躺平，尽量买小权重」
+  中性市(其余)                 → 持仓
 
 板块贡献图: 沪深300 + 上证 (调用 index_contribution.py 生成)
 
@@ -148,8 +148,8 @@ def main():
             sectors = [(s, ret[s]) for s in top.index]
     else:
         state_tag = '中性'
-        action = '躺平，尽量买小权重'
-        action_color = 'warning'  # 红(躺平)
+        action = '持仓'
+        action_color = 'warning'  # 红(持仓)
         sectors = []
 
     # ===== 5. 生成板块贡献图 (沪深300 + 上证) =====
