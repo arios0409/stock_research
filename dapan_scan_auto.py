@@ -468,7 +468,7 @@ else:
 
 msg = f"""【上证指数 KDJ概率系统 V6】{last_data_date}
 当前方向: {cur_dir}
-Pu(上升概率) {cur_pu:.0f}%  |  5日斜率 {cur_slope:+.0f}
+Pu(上升概率) {cur_pu:.0f}%  |  Pd(下降概率) {cur_pd:.0f}%  |  5日斜率 {cur_slope:+.0f}
 {advice}"""
 
 # ===== 6. 发送到企业微信（多群） =====
