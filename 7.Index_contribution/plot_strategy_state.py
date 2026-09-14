@@ -100,18 +100,34 @@ def main():
     closes = np.array(closes)
     states = np.array(states)
 
-    # ===== 4. 画图 =====
+    # ===== 4. 画图 (单面板, 背景色带叠加在走势图内, 同大盘扫描子图1) =====
     c_bg = '#0d1117'
     c_txt = '#c9d1d9'
     c_grid = '#21262d'
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 7), sharex=True,
-                                   gridspec_kw={'height_ratios': [5, 1]}, facecolor=c_bg)
-    fig.subplots_adjust(hspace=0.05)
-
-    # 上面板: 上证走势
+    fig, ax1 = plt.subplots(1, 1, figsize=(16, 7), facecolor=c_bg)
     ax1.set_facecolor(c_bg)
+
+    # 背景色带: 对连续状态段画 axvspan
+    i = 0
+    while i < len(states):
+        s = states[i]
+        j = i
+        while j < len(states) and states[j] == s:
+            j += 1
+        for idx in range(i, j):
+            if idx < len(dates) - 1:
+                ax1.axvspan(dates[idx], dates[idx + 1], alpha=0.16, color=COLORS[s],
+                            linewidth=0, zorder=0)
+        # 段足够长时, 在段中间底部标注状态名
+        if j - i >= 10:
+            mid = i + (j - i) // 2
+            ax1.text(dates[mid], closes.min() - (closes.max() - closes.min()) * 0.04,
+                     s, color=COLORS[s], fontsize=9, fontweight='bold',
+                     ha='center', va='top', zorder=4)
+        i = j
+
+    # 走势线
     ax1.plot(dates, closes, color='#e6edf3', linewidth=1.3, zorder=3)
-    ax1.fill_between(dates, closes.min(), closes, color='#e6edf3', alpha=0.06, zorder=1)
     ax1.set_title('上证指数走势 × 每日策略状态（2025-01 ~ 2026-09）', color=c_txt,
                   fontsize=15, fontweight='bold', pad=12, loc='left')
     ax1.set_ylabel('上证指数', color=c_txt, fontsize=11)
@@ -122,30 +138,8 @@ def main():
         ax1.spines[sp].set_color(c_grid)
     ax1.grid(True, color=c_grid, linewidth=0.5, alpha=0.6)
     ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:,.0f}'))
-
-    # 下面板: 状态颜色条
-    ax2.set_facecolor(c_bg)
-    state_code = {'持仓': 0, '追动量': 1, '空仓': 2, '做反转': 3}
-    codes = np.array([state_code[s] for s in states])
-    # 用 pcolormesh 画 1×N 颜色条
-    cmap = matplotlib.colors.ListedColormap(
-        [COLORS['持仓'], COLORS['追动量'], COLORS['空仓'], COLORS['做反转']])
-    # 扩展日期边界
-    if len(dates) > 1:
-        d_edges = np.concatenate([dates, [dates[-1] + pd.Timedelta(days=1)]])
-    else:
-        d_edges = dates
-    X, Y = np.meshgrid(d_edges, [0, 1])
-    Z = codes.reshape(1, -1)
-    ax2.pcolormesh(X, Y, Z, cmap=cmap, vmin=0, vmax=3, shading='flat')
-    ax2.set_yticks([])
-    ax2.set_ylabel('状态', color=c_txt, fontsize=11)
-    for sp in ['top', 'right', 'left']:
-        ax2.spines[sp].set_visible(False)
-    ax2.spines['bottom'].set_color(c_grid)
-    ax2.tick_params(colors=c_txt, labelsize=10)
-    ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
-    ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+    ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
 
     # 图例
     from matplotlib.patches import Patch
