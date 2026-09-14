@@ -41,7 +41,7 @@ MOM_WINDOW = 20      # 动量窗口
 REV_WINDOW = 40      # 反转窗口
 SLOPE_WINDOW = 5     # Pu 斜率窗口
 PU_LEVEL = 60        # Pu 水平阈值
-REBAL_THRESHOLD = 0.50  # 等权再平衡调仓阈值(偏离百分点, 低于此不调) — 回测最优
+REBAL_THRESHOLD = 0.30  # 等权再平衡调仓阈值(偏离百分点, 低于此不调)
 REBAL_MAX = 5           # 单次最多调仓板块数(3~5)
 
 # ===== 企业微信 webhook (与 dapan_scan_auto.py 一致) =====
