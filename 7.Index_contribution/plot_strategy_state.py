@@ -31,12 +31,12 @@ TREND_THRESHOLD = 0.10
 SLOPE_WINDOW = 5
 PU_LEVEL = 60
 
-# 状态颜色
+# 状态颜色 (高饱和, 色相充分拉开)
 COLORS = {
-    '持仓': '#4472C4',    # 蓝
-    '追动量': '#2ecc71',  # 绿
-    '空仓': '#e0443a',    # 红
-    '做反转': '#9b59b6',  # 紫
+    '持仓': '#3b82f6',    # 纯蓝
+    '追动量': '#22c55e',  # 纯绿
+    '空仓': '#ef4444',    # 纯红
+    '做反转': '#d946ef',  # 品红紫(与蓝红都拉开)
 }
 
 
@@ -116,7 +116,7 @@ def main():
             j += 1
         for idx in range(i, j):
             if idx < len(dates) - 1:
-                ax1.axvspan(dates[idx], dates[idx + 1], alpha=0.16, color=COLORS[s],
+                ax1.axvspan(dates[idx], dates[idx + 1], alpha=0.55, color=COLORS[s],
                             linewidth=0, zorder=0)
         # 段足够长时, 在段中间底部标注状态名
         if j - i >= 10:
