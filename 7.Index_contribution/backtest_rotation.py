@@ -69,6 +69,8 @@ def main():
     else:
         rev_filter = np.ones(n_days, dtype=bool)
         pd_danger = np.zeros(n_days, dtype=bool)
+        pu = np.full(n_days, 50.0)
+        pd_ = np.full(n_days, 50.0)
         print('[WARN] 未找到 sh_index_daily.csv, 轮动反转不做过过滤', file=sys.stderr)
 
     # 轮动/持续状态
@@ -131,10 +133,14 @@ def main():
     ret_mom_d = daily_ret(w_mom)
     ret_rev_d = daily_ret(w_rev)
     ret_equal_th = equal_thresh_daily(0.3)
+    # 大盘极端弱势: Pu<20 且 Pd>80 → 中性市空仓 (shift1对齐: 等权收益是T-1收盘定持仓)
+    ext_weak = (pu < 20) & (pd_ > 80)
+    ext_prev = np.roll(ext_weak, 1)
+    ext_prev[0] = False
     ret_G = np.zeros(n_days)
     ret_G[is_trend] = ret_mom_d[is_trend]
     ret_G[is_rot & rev_filter] = ret_rev_d[is_rot & rev_filter]
-    ret_G[is_neutral] = ret_equal_th[is_neutral]
+    ret_G[is_neutral & ~ext_prev] = ret_equal_th[is_neutral & ~ext_prev]
 
     strategies = {
         'A 基准·全板块等权buy&hold': (w_equal * r).sum(axis=1),  # 始终满仓, 无信号延迟

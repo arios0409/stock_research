@@ -43,6 +43,8 @@ SLOPE_WINDOW = 5     # Pu 斜率窗口
 PU_LEVEL = 60        # Pu 水平阈值
 REBAL_THRESHOLD = 0.30  # 等权再平衡调仓阈值(偏离百分点, 低于此不调)
 REBAL_MAX = 5           # 单次最多调仓板块数(3~5)
+PU_WEAK = 20            # 大盘极端弱势: Pu < 此值(中性市触发空仓)
+PD_WEAK = 80            # 大盘极端弱势: Pd > 此值(中性市触发空仓)
 
 # ===== 企业微信 webhook (与 dapan_scan_auto.py 一致) =====
 WEBHOOK_KEYS = {
@@ -151,21 +153,30 @@ def main():
             action_color = 'info'      # 绿(买入)
             sectors = [(s, ret[s]) for s in top.index]
     else:
-        state_tag = '中性'
-        action = '持仓'
-        action_color = 'warning'  # 红(持仓)
-        sectors = []
-        # 等权再平衡: 基于20日累计涨幅算偏离等权基准(1/29), 阈值过滤+最多调REBAL_MAX个
-        ret20_all = df.rolling(MOM_WINDOW, min_periods=MOM_WINDOW).sum().iloc[-1]
-        base = 100.0 / df.shape[1]
-        # 当前占比(近似)=base*(1+20日涨幅), 调仓量=base-当前占比
-        info = {s: (base * (1 + ret20_all[s] / 100.0),
-                    base - base * (1 + ret20_all[s] / 100.0)) for s in df.columns}
-        # 只保留偏离超过阈值的板块, 按偏离绝对值降序取前 REBAL_MAX 个
-        sig = sorted(info.items(), key=lambda x: -abs(x[1][1]))
-        sig = [(s, v) for s, v in sig if abs(v[1]) > REBAL_THRESHOLD][:REBAL_MAX]
-        rebal_buy = [(s, v[0], v[1]) for s, v in sig if v[1] > 0]    # (板块,当前占比,调仓量)
-        rebal_sell = [(s, v[0], v[1]) for s, v in sig if v[1] < 0]   # (板块,当前占比,调仓量)
+        if (cur_pu < PU_WEAK) and (cur_pd > PD_WEAK):
+            # 中性市 + 大盘极端弱势 → 空仓 (躲恐慌底)
+            state_tag = '中性'
+            action = '空仓（大盘极端弱势）'
+            action_color = 'warning'  # 红(空仓)
+            sectors = []
+            rebal_buy = []
+            rebal_sell = []
+        else:
+            state_tag = '中性'
+            action = '持仓'
+            action_color = 'warning'  # 红(持仓)
+            sectors = []
+            # 等权再平衡: 基于20日累计涨幅算偏离等权基准(1/29), 阈值过滤+最多调REBAL_MAX个
+            ret20_all = df.rolling(MOM_WINDOW, min_periods=MOM_WINDOW).sum().iloc[-1]
+            base = 100.0 / df.shape[1]
+            # 当前占比(近似)=base*(1+20日涨幅), 调仓量=base-当前占比
+            info = {s: (base * (1 + ret20_all[s] / 100.0),
+                        base - base * (1 + ret20_all[s] / 100.0)) for s in df.columns}
+            # 只保留偏离超过阈值的板块, 按偏离绝对值降序取前 REBAL_MAX 个
+            sig = sorted(info.items(), key=lambda x: -abs(x[1][1]))
+            sig = [(s, v) for s, v in sig if abs(v[1]) > REBAL_THRESHOLD][:REBAL_MAX]
+            rebal_buy = [(s, v[0], v[1]) for s, v in sig if v[1] > 0]    # (板块,当前占比,调仓量)
+            rebal_sell = [(s, v[0], v[1]) for s, v in sig if v[1] < 0]   # (板块,当前占比,调仓量)
 
     # ===== 5. 生成板块贡献图 (沪深300 + 上证) =====
     subprocess.run([sys.executable, os.path.join(SCRIPT_DIR, 'index_contribution.py'),
