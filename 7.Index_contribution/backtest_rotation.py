@@ -55,16 +55,20 @@ def main():
     sh_path = os.path.join(SCRIPT_DIR, 'output', 'sh_index_daily.csv')
     if os.path.exists(sh_path):
         sh = pd.read_csv(sh_path)
-        _, p_up, _ = dapan_direction.compute_direction(
+        _, p_up, p_down = dapan_direction.compute_direction(
             sh['close'].values, sh['high'].values, sh['low'].values, sh['vol'].values,
             return_probs=True)
         pu_map = dict(zip(sh['trade_date'].astype(str), p_up))
+        pd_map = dict(zip(sh['trade_date'].astype(str), p_down))
         pu = np.array([pu_map.get(td, 50.0) for td in df.index])
+        pd_ = np.array([pd_map.get(td, 50.0) for td in df.index])
         slope5 = pu - np.roll(pu, 5)
         slope5[:5] = 0
         rev_filter = (slope5 > 0) | (pu > 60)
+        pd_danger = pd_ > 70    # 下降概率>70% → 强制空仓
     else:
         rev_filter = np.ones(n_days, dtype=bool)
+        pd_danger = np.zeros(n_days, dtype=bool)
         print('[WARN] 未找到 sh_index_daily.csv, 轮动反转不做过过滤', file=sys.stderr)
 
     # 轮动/持续状态
@@ -110,6 +114,8 @@ def main():
     w_switch_f = (w_mom * is_trend[:, None]
                   + w_rev * (is_rot & rev_filter)[:, None]
                   + w_equal * is_neutral[:, None])
+    # F: E 策略 + Pd(下降概率)>70% 强制空仓
+    w_switch_f2 = w_switch_f * (~pd_danger)[:, None]
 
     strategies = {
         'A 基准·全板块等权buy&hold': (w_equal * r).sum(axis=1),  # 始终满仓, 无信号延迟
@@ -117,6 +123,7 @@ def main():
         'C 纯动量·20日涨幅top5': daily_ret(w_mom),
         'D 状态切换·持续动量/轮动反转/中性等权': daily_ret(w_switch),
         'E 状态切换·轮动反转加斜率过滤': daily_ret(w_switch_f),
+        'F 状态切换·斜率过滤+Pd>70空仓': daily_ret(w_switch_f2),
     }
 
     def perf(name, rr):
@@ -166,12 +173,13 @@ def main():
     yA = yearly(strategies['A 基准·全板块等权buy&hold'])
     yD = yearly(strategies['D 状态切换·持续动量/轮动反转/中性等权'])
     yE = yearly(strategies['E 状态切换·轮动反转加斜率过滤'])
+    yF = yearly(strategies['F 状态切换·斜率过滤+Pd>70空仓'])
     ylist = sorted(set(yA) | set(yD))
-    print(f"{'年份':<8}{'A等权':>10}{'D切换':>10}{'E过滤切换':>12}{'D-A':>10}{'E-A':>10}")
-    print('-' * 62)
+    print(f"{'年份':<8}{'A等权':>10}{'D切换':>10}{'E过滤':>10}{'F Pd>70':>10}{'F-A':>10}{'E-A':>10}")
+    print('-' * 78)
     for y in ylist:
-        a = yA.get(y, 0.0); d = yD.get(y, 0.0); e = yE.get(y, 0.0)
-        print(f'{y:<8}{a*100:>+9.1f}%{d*100:>+9.1f}%{e*100:>+11.1f}%{(d-a)*100:>+9.1f}%{(e-a)*100:>+9.1f}%')
+        a = yA.get(y, 0.0); d = yD.get(y, 0.0); e = yE.get(y, 0.0); f = yF.get(y, 0.0)
+        print(f'{y:<8}{a*100:>+9.1f}%{d*100:>+9.1f}%{e*100:>+9.1f}%{f*100:>+9.1f}%{(f-a)*100:>+9.1f}%{(e-a)*100:>+9.1f}%')
 
     out = pd.DataFrame({'date': df.index,
                         'A_equal_hold': results['A 基准·全板块等权buy&hold'][6],

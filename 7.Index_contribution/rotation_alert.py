@@ -125,6 +125,8 @@ def main():
     direction = '上升' if rev_pass else '下跌'
 
     # ===== 4. 分支生成建议 =====
+    rebal_buy = []
+    rebal_sell = []
     if is_trend:
         ret = df.rolling(MOM_WINDOW, min_periods=MOM_WINDOW).sum().iloc[-1]
         top = ret.sort_values(ascending=False).head(TOPN)
@@ -151,6 +153,12 @@ def main():
         action = '持仓'
         action_color = 'warning'  # 红(持仓)
         sectors = []
+        # 等权再平衡: 基于20日累计涨幅算偏离等权基准(1/29)的买卖建议
+        ret20_all = df.rolling(MOM_WINDOW, min_periods=MOM_WINDOW).sum().iloc[-1]
+        base = 100.0 / df.shape[1]
+        delta = {s: base - base * (1 + ret20_all[s] / 100.0) for s in df.columns}
+        rebal_buy = sorted(delta.items(), key=lambda x: -x[1])[:3]   # 补仓(20日跌幅最大)
+        rebal_sell = sorted(delta.items(), key=lambda x: x[1])[:3]   # 减仓(20日涨幅最大)
 
     # ===== 5. 生成板块贡献图 (沪深300 + 上证) =====
     subprocess.run([sys.executable, os.path.join(SCRIPT_DIR, 'index_contribution.py'),
@@ -167,6 +175,11 @@ def main():
         lines.append('**买入板块：**')
         for i, (s, ret) in enumerate(sectors, 1):
             lines.append(f'{i}. {s} ({ret:+.1f}%)')
+    if rebal_buy and rebal_sell:
+        lines.append('')
+        lines.append('**等权再平衡：**')
+        lines.append('买入: ' + '、'.join(f'{s} {d:+.2f}pp' for s, d in rebal_buy))
+        lines.append('卖出: ' + '、'.join(f'{s} {d:+.2f}pp' for s, d in rebal_sell))
     msg = '\n'.join(lines)
 
     # ===== 7. 发送 =====
