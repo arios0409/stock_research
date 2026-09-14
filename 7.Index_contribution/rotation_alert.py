@@ -41,7 +41,7 @@ MOM_WINDOW = 20      # 动量窗口
 REV_WINDOW = 40      # 反转窗口
 SLOPE_WINDOW = 5     # Pu 斜率窗口
 PU_LEVEL = 60        # Pu 水平阈值
-REBAL_THRESHOLD = 0.10  # 等权再平衡调仓阈值(偏离百分点, 低于此不调)
+REBAL_THRESHOLD = 0.50  # 等权再平衡调仓阈值(偏离百分点, 低于此不调) — 回测最优
 REBAL_MAX = 5           # 单次最多调仓板块数(3~5)
 
 # ===== 企业微信 webhook (与 dapan_scan_auto.py 一致) =====
@@ -158,12 +158,14 @@ def main():
         # 等权再平衡: 基于20日累计涨幅算偏离等权基准(1/29), 阈值过滤+最多调REBAL_MAX个
         ret20_all = df.rolling(MOM_WINDOW, min_periods=MOM_WINDOW).sum().iloc[-1]
         base = 100.0 / df.shape[1]
-        delta = {s: base - base * (1 + ret20_all[s] / 100.0) for s in df.columns}
+        # 当前占比(近似)=base*(1+20日涨幅), 调仓量=base-当前占比
+        info = {s: (base * (1 + ret20_all[s] / 100.0),
+                    base - base * (1 + ret20_all[s] / 100.0)) for s in df.columns}
         # 只保留偏离超过阈值的板块, 按偏离绝对值降序取前 REBAL_MAX 个
-        sig = sorted(delta.items(), key=lambda x: -abs(x[1]))
-        sig = [(s, d) for s, d in sig if abs(d) > REBAL_THRESHOLD][:REBAL_MAX]
-        rebal_buy = [(s, d) for s, d in sig if d > 0]    # 补仓(偏离为正)
-        rebal_sell = [(s, d) for s, d in sig if d < 0]   # 减仓(偏离为负)
+        sig = sorted(info.items(), key=lambda x: -abs(x[1][1]))
+        sig = [(s, v) for s, v in sig if abs(v[1]) > REBAL_THRESHOLD][:REBAL_MAX]
+        rebal_buy = [(s, v[0], v[1]) for s, v in sig if v[1] > 0]    # (板块,当前占比,调仓量)
+        rebal_sell = [(s, v[0], v[1]) for s, v in sig if v[1] < 0]   # (板块,当前占比,调仓量)
 
     # ===== 5. 生成板块贡献图 (沪深300 + 上证) =====
     subprocess.run([sys.executable, os.path.join(SCRIPT_DIR, 'index_contribution.py'),
@@ -182,9 +184,9 @@ def main():
             lines.append(f'{i}. {s} ({ret:+.1f}%)')
     if rebal_buy and rebal_sell:
         lines.append('')
-        lines.append('**等权再平衡：**')
-        lines.append('买入: ' + '、'.join(f'{s} {d:+.2f}pp' for s, d in rebal_buy))
-        lines.append('卖出: ' + '、'.join(f'{s} {d:+.2f}pp' for s, d in rebal_sell))
+        lines.append(f'**等权再平衡（基准 {100.0/df.shape[1]:.2f}%）：**')
+        lines.append('买入: ' + '、'.join(f'{s} {cur:.2f}%→{100.0/df.shape[1]:.2f}%({d:+.2f}pp)' for s, cur, d in rebal_buy))
+        lines.append('卖出: ' + '、'.join(f'{s} {cur:.2f}%→{100.0/df.shape[1]:.2f}%({d:+.2f}pp)' for s, cur, d in rebal_sell))
     msg = '\n'.join(lines)
 
     # ===== 7. 发送 =====

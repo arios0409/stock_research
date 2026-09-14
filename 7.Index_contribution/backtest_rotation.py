@@ -116,6 +116,25 @@ def main():
                   + w_equal * is_neutral[:, None])
     # F: E 策略 + Pd(下降概率)>70% 强制空仓
     w_switch_f2 = w_switch_f * (~pd_danger)[:, None]
+    # G: 状态切换 + 斜率过滤 + 中性市0.5pp阈值等权(最优)
+    def equal_thresh_daily(th):
+        bw = 1.0 / n_sec
+        w = np.full(n_sec, bw)
+        d = np.zeros(n_days)
+        for t in range(n_days):
+            d[t] = (w * r[t]).sum()
+            w = w * (1 + r[t])
+            dp = (bw - w) * 100
+            sig = np.where(np.abs(dp) > th)[0]
+            w[sig] = bw
+        return d
+    ret_mom_d = daily_ret(w_mom)
+    ret_rev_d = daily_ret(w_rev)
+    ret_equal_th = equal_thresh_daily(0.5)
+    ret_G = np.zeros(n_days)
+    ret_G[is_trend] = ret_mom_d[is_trend]
+    ret_G[is_rot & rev_filter] = ret_rev_d[is_rot & rev_filter]
+    ret_G[is_neutral] = ret_equal_th[is_neutral]
 
     strategies = {
         'A 基准·全板块等权buy&hold': (w_equal * r).sum(axis=1),  # 始终满仓, 无信号延迟
@@ -124,6 +143,7 @@ def main():
         'D 状态切换·持续动量/轮动反转/中性等权': daily_ret(w_switch),
         'E 状态切换·轮动反转加斜率过滤': daily_ret(w_switch_f),
         'F 状态切换·斜率过滤+Pd>70空仓': daily_ret(w_switch_f2),
+        'G 状态切换·斜率过滤+中性0.5pp阈值等权': ret_G,
     }
 
     def perf(name, rr):
@@ -173,18 +193,19 @@ def main():
     yA = yearly(strategies['A 基准·全板块等权buy&hold'])
     yD = yearly(strategies['D 状态切换·持续动量/轮动反转/中性等权'])
     yE = yearly(strategies['E 状态切换·轮动反转加斜率过滤'])
-    yF = yearly(strategies['F 状态切换·斜率过滤+Pd>70空仓'])
+    yG = yearly(strategies['G 状态切换·斜率过滤+中性0.5pp阈值等权'])
     ylist = sorted(set(yA) | set(yD))
-    print(f"{'年份':<8}{'A等权':>10}{'D切换':>10}{'E过滤':>10}{'F Pd>70':>10}{'F-A':>10}{'E-A':>10}")
-    print('-' * 78)
+    print(f"{'年份':<8}{'A等权':>10}{'E过滤':>10}{'G最优':>10}{'G-A':>10}{'G-E':>10}")
+    print('-' * 60)
     for y in ylist:
-        a = yA.get(y, 0.0); d = yD.get(y, 0.0); e = yE.get(y, 0.0); f = yF.get(y, 0.0)
-        print(f'{y:<8}{a*100:>+9.1f}%{d*100:>+9.1f}%{e*100:>+9.1f}%{f*100:>+9.1f}%{(f-a)*100:>+9.1f}%{(e-a)*100:>+9.1f}%')
+        a = yA.get(y, 0.0); e = yE.get(y, 0.0); g = yG.get(y, 0.0)
+        print(f'{y:<8}{a*100:>+9.1f}%{e*100:>+9.1f}%{g*100:>+9.1f}%{(g-a)*100:>+9.1f}%{(g-e)*100:>+9.1f}%')
 
     out = pd.DataFrame({'date': df.index,
                         'A_equal_hold': results['A 基准·全板块等权buy&hold'][6],
                         'D_switch': results['D 状态切换·持续动量/轮动反转/中性等权'][6],
-                        'E_switch_f': results['E 状态切换·轮动反转加斜率过滤'][6]})
+                        'E_switch_f': results['E 状态切换·轮动反转加斜率过滤'][6],
+                        'G_best': results['G 状态切换·斜率过滤+中性0.5pp阈值等权'][6]})
     out.to_csv(os.path.join(SCRIPT_DIR, 'output', 'backtest_rotation_nav.csv'),
                index=False, encoding='utf-8-sig')
     print(f"\n[CSV] 净值曲线 → output/backtest_rotation_nav.csv")
