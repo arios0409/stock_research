@@ -30,6 +30,8 @@ ROT_THRESHOLD = 0.10
 TREND_THRESHOLD = 0.10
 SLOPE_WINDOW = 5
 PU_LEVEL = 60
+PU_WEAK = 20            # 大盘极端弱势: 中性市 Pu<此值
+PD_WEAK = 80            # 大盘极端弱势: 中性市 Pd>此值
 
 # 状态颜色 (高饱和, 色相充分拉开)
 COLORS = {
@@ -58,6 +60,7 @@ def main():
         sh['close'].values, sh['high'].values, sh['low'].values, sh['vol'].values,
         return_probs=True)
     sh['pu'] = p_up
+    sh['pd'] = p_down
 
     # ===== 2. 板块 10日IC =====
     ret = pd.read_csv(os.path.join(OUT_DIR, 'sector_ret_cache.csv'), index_col=0)
@@ -79,6 +82,7 @@ def main():
         if td < '20250101':
             continue
         pu = sh['pu'].iloc[i]
+        pd_ = sh['pd'].iloc[i]
         slope = pu - sh['pu'].iloc[i - SLOPE_WINDOW] if i >= SLOPE_WINDOW else np.nan
         cur_ic = ic_map.get(td, np.nan)
         if np.isnan(cur_ic):
@@ -91,7 +95,11 @@ def main():
             rev_pass = (slope > 0) or (pu > PU_LEVEL) if not np.isnan(slope) else False
             st = '做反转' if rev_pass else '空仓'
         else:
-            st = '持仓'
+            # 中性市: 大盘极端弱势(Pu<20且Pd>80) → 空仓
+            if (pu < PU_WEAK) and (pd_ > PD_WEAK):
+                st = '空仓'
+            else:
+                st = '持仓'
         dates.append(pd.to_datetime(td))
         closes.append(sh['close'].iloc[i])
         states.append(st)
