@@ -6,6 +6,10 @@
 """
 import os
 import sys
+import json
+import base64
+import hashlib
+import urllib.request
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -40,6 +44,24 @@ COLORS = {
     '空仓': '#ef4444',    # 纯红
     '做反转': '#d946ef',  # 品红紫(与蓝红都拉开)
 }
+
+# 只发伯利克利群
+BOLIKELI_KEY = '62d8c6d6-df0a-410b-915d-bd8bbdd145a8'
+
+
+def send_image(webhook_key, file_path):
+    with open(file_path, 'rb') as f:
+        raw = f.read()
+    b64 = base64.b64encode(raw).decode()
+    md5 = hashlib.md5(raw).hexdigest()
+    url = f'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={webhook_key}'
+    data = json.dumps({'msgtype': 'image', 'image': {'base64': b64, 'md5': md5}}).encode('utf-8')
+    req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+    try:
+        resp = urllib.request.urlopen(req, timeout=30)
+        return json.loads(resp.read().decode('utf-8'))
+    except Exception as e:
+        return {'errcode': -1, 'errmsg': str(e)}
 
 
 def rank_ic(a, b):
@@ -164,6 +186,13 @@ def main():
     from collections import Counter
     cnt = Counter(states)
     print('状态分布:', dict(cnt))
+
+    # 发送到伯利克利
+    if '--no-send' in sys.argv:
+        print('[--no-send] 跳过发送状态图')
+    else:
+        r = send_image(BOLIKELI_KEY, out)
+        print(f'[发送] 状态图到伯利克利: {r}')
 
 
 if __name__ == '__main__':
