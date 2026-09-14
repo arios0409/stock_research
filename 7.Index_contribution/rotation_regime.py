@@ -225,11 +225,13 @@ def main():
             sector_ret[td] = df.groupby('l1')['pct_chg'].mean().to_dict()
             time.sleep(0.05)
         new_df = pd.DataFrame.from_dict(sector_ret, orient='index')
-        ret_df = pd.concat([cached, new_df]).reindex(trade_days) if cached is not None \
-            else new_df.reindex(trade_days)
+        # 完整缓存 = 旧缓存 + 新数据 (保留全部历史, 不截断)
+        full_cache = pd.concat([cached, new_df]) if cached is not None else new_df
+        full_cache = full_cache[~full_cache.index.duplicated(keep='last')].sort_index()
         os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
-        ret_df.to_csv(CACHE_PATH)
-        print('  [缓存] 已更新 sector_ret_cache.csv', file=sys.stderr)
+        full_cache.to_csv(CACHE_PATH)
+        ret_df = full_cache.reindex(trade_days)  # 计算/画图用最近 LOOKBACK_DAYS 天
+        print('  [缓存] 已更新 sector_ret_cache.csv (保留完整历史)', file=sys.stderr)
 
     top1_name = ret_df.idxmax(axis=1).to_dict()
     top1_ret = ret_df.max(axis=1).to_dict()
